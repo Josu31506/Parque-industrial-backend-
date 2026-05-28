@@ -24,10 +24,7 @@ export class SalesService {
   }
 
   async findOne(id: string, userId: string, role: string) {
-    const sale = await this.prisma.sale.findUniqueOrThrow({
-      where: { id },
-      include: { items: { include: { product: true } }, producer: true },
-    });
+    const sale = await this.findSaleWithRelations(id);
     if (role !== Role.ADMIN && sale.producer.userId !== userId) {
       throw new ForbiddenException('No puedes ver esta venta.');
     }
@@ -70,10 +67,36 @@ export class SalesService {
           data: { status: OrderStatus.READY_FOR_DISPATCH },
         });
       }
-      await this.notifications.createForUser(sale.order.customerId, 'Venta lista para despacho', 'Un productor marco productos listos para despacho.', 'ORDER', sale.orderId);
+      await this.notifications.createForUser(
+        sale.order.customerId,
+        'Venta lista para despacho',
+        'Un productor marco productos listos para despacho.',
+        'ORDER',
+        sale.orderId,
+      );
     }
 
     return updated;
+  }
+
+  private findSaleWithRelations(id: string) {
+    return this.prisma.sale.findUniqueOrThrow({
+      where: { id },
+      include: {
+        order: {
+          select: {
+            id: true,
+            customerId: true,
+          },
+        },
+        producer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+      },
+    });
   }
 
   private mapSaleStatusToItemStatus(status: SaleStatus) {
