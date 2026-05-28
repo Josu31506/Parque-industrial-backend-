@@ -1,0 +1,417 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  SELLER
+  ADVISOR
+  ADMIN
+}
+
+enum ProductType {
+  FEATURED
+  ECO
+}
+
+enum AvailabilityType {
+  IN_STOCK
+  MADE_TO_ORDER
+  CUSTOM_QUOTE
+}
+
+enum PurchaseRequestStatus {
+  PENDING_PRODUCER_CONFIRMATION
+  PARTIALLY_CONFIRMED
+  CONFIRMED
+  PARTIALLY_REJECTED
+  READY_TO_PAY
+  CANCELLED
+  EXPIRED
+  CONVERTED_TO_ORDER
+}
+
+enum PurchaseRequestGroupStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum PaymentOption {
+  FULL_PAYMENT
+  HALF_ADVANCE
+}
+
+enum PaymentStatus {
+  PENDING
+  FULLY_PAID
+  PARTIALLY_PAID
+}
+
+enum FundsStatus {
+  HELD
+  RELEASED
+  HELD_BY_CLAIM
+}
+
+enum OrderStatus {
+  PAYMENT_PENDING
+  PAYMENT_PARTIAL
+  PAYMENT_COMPLETED
+  ORDER_CONFIRMED
+  IN_PREPARATION
+  READY_FOR_DISPATCH
+  DISPATCHED
+  DELIVERED
+  IN_REVIEW
+  CLOSED
+  IN_CLAIM
+}
+
+enum SaleStatus {
+  NEW_SALE
+  IN_PREPARATION
+  READY_FOR_DISPATCH
+  DISPATCHED
+  DELIVERED
+  IN_REVIEW
+  LIQUIDATED
+  HELD_BY_CLAIM
+}
+
+enum ClaimStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum ClaimReason {
+  DAMAGED_PRODUCT
+  WRONG_PRODUCT
+  WRONG_DIMENSIONS
+  WRONG_COLOR
+  NOT_DELIVERED
+  OTHER
+}
+
+enum QuoteStatus {
+  PENDING_REVIEW
+  IN_COORDINATION
+  CONSULTING_PRODUCER
+  PROPOSAL_RECEIVED
+  RESOLUTION_SENT
+  ADDED_TO_CART
+  PAID
+  CONVERTED_TO_ORDER
+  REJECTED
+  EXPIRED
+}
+
+enum QuoteType {
+  PRODUCT_BASED
+  REFERENCE_IMAGE
+}
+
+enum OrderItemStatus {
+  PENDING
+  IN_PREPARATION
+  READY_FOR_DISPATCH
+  DISPATCHED
+  DELIVERED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  passwordHash  String
+  role          Role      @default(CLIENT)
+  phone         String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  producer          Producer?
+  cartItems         CartItem[]
+  purchaseRequests  PurchaseRequest[]
+  orders            Order[]
+  claims            Claim[]
+  notifications     Notification[]
+  quoteRequests     QuoteRequest[]
+}
+
+model Producer {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  businessName  String
+  type          String
+  location      String
+  description   String
+  rating        Float?
+  isApproved    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user                    User                    @relation(fields: [userId], references: [id])
+  products                Product[]
+  purchaseRequestItems    PurchaseRequestItem[]
+  purchaseRequestGroups   PurchaseRequestGroup[]
+  orderItems              OrderItem[]
+  sales                   Sale[]
+  quoteResolutions        QuoteResolution[]
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  icon        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id                    String           @id @default(cuid())
+  producerId            String
+  categoryId            String
+  title                 String
+  description           String
+  price                 Decimal          @db.Decimal(12, 2)
+  numericPrice          Float
+  imageUrl              String
+  badge                 String?
+  type                  ProductType
+  availabilityType      AvailabilityType
+  stock                 Int?
+  estimatedDispatchDays Int?
+  dimensions            String?
+  materials             String?
+  colors                Json?
+  finish                String?
+  customizable          Boolean          @default(false)
+  isActive              Boolean          @default(true)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  producer              Producer              @relation(fields: [producerId], references: [id])
+  category              Category              @relation(fields: [categoryId], references: [id])
+  cartItems             CartItem[]
+  purchaseRequestItems  PurchaseRequestItem[]
+  orderItems            OrderItem[]
+  saleItems             SaleItem[]
+  quoteRequests         QuoteRequest[]
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+}
+
+model PurchaseRequest {
+  id                    String                @id @default(cuid())
+  customerId            String
+  status                PurchaseRequestStatus @default(PENDING_PRODUCER_CONFIRMATION)
+  deliveryDays          Int                   @default(2)
+  total                 Decimal               @db.Decimal(12, 2)
+  estimatedDeliveryDate DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  customer User                   @relation(fields: [customerId], references: [id])
+  items    PurchaseRequestItem[]
+  groups   PurchaseRequestGroup[]
+  order    Order?
+}
+
+model PurchaseRequestItem {
+  id                String  @id @default(cuid())
+  purchaseRequestId String
+  productId         String
+  producerId        String
+  quantity          Int
+  unitPrice         Decimal @db.Decimal(12, 2)
+  totalPrice        Decimal @db.Decimal(12, 2)
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id])
+  product         Product         @relation(fields: [productId], references: [id])
+  producer        Producer        @relation(fields: [producerId], references: [id])
+}
+
+model PurchaseRequestGroup {
+  id                String                     @id @default(cuid())
+  purchaseRequestId String
+  producerId        String
+  status            PurchaseRequestGroupStatus @default(PENDING)
+  readyDate         DateTime?
+  observation       String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id])
+  producer        Producer        @relation(fields: [producerId], references: [id])
+
+  @@unique([purchaseRequestId, producerId])
+}
+
+model Order {
+  id                    String         @id @default(cuid())
+  customerId            String
+  purchaseRequestId     String?        @unique
+  status                OrderStatus    @default(ORDER_CONFIRMED)
+  total                 Decimal        @db.Decimal(12, 2)
+  paymentOption         PaymentOption?
+  paidAmount            Decimal        @default(0) @db.Decimal(12, 2)
+  remainingAmount       Decimal        @default(0) @db.Decimal(12, 2)
+  paymentStatus         PaymentStatus  @default(PENDING)
+  fundsStatus           FundsStatus    @default(HELD)
+  estimatedDeliveryDate DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  customer        User             @relation(fields: [customerId], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
+  items           OrderItem[]
+  sales           Sale[]
+  claims          Claim[]
+}
+
+model OrderItem {
+  id         String          @id @default(cuid())
+  orderId    String
+  productId  String
+  producerId String
+  quantity   Int
+  unitPrice  Decimal         @db.Decimal(12, 2)
+  totalPrice Decimal         @db.Decimal(12, 2)
+  status     OrderItemStatus @default(PENDING)
+
+  order    Order    @relation(fields: [orderId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  producer Producer @relation(fields: [producerId], references: [id])
+}
+
+model Sale {
+  id               String        @id @default(cuid())
+  orderId          String
+  producerId       String
+  status           SaleStatus    @default(NEW_SALE)
+  grossAmount      Decimal       @db.Decimal(12, 2)
+  commissionAmount Decimal       @db.Decimal(12, 2)
+  netAmount        Decimal       @db.Decimal(12, 2)
+  paymentStatus    PaymentStatus @default(PENDING)
+  fundsStatus      FundsStatus   @default(HELD)
+  readyDate        DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  order    Order      @relation(fields: [orderId], references: [id])
+  producer Producer   @relation(fields: [producerId], references: [id])
+  items    SaleItem[]
+}
+
+model SaleItem {
+  id         String          @id @default(cuid())
+  saleId     String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal         @db.Decimal(12, 2)
+  totalPrice Decimal         @db.Decimal(12, 2)
+  status     OrderItemStatus @default(PENDING)
+
+  sale    Sale    @relation(fields: [saleId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Claim {
+  id          String      @id @default(cuid())
+  orderId     String
+  customerId  String
+  reason      ClaimReason
+  description String
+  status      ClaimStatus @default(OPEN)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  resolvedAt  DateTime?
+
+  order    Order @relation(fields: [orderId], references: [id])
+  customer User  @relation(fields: [customerId], references: [id])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  title      String
+  message    String
+  type       String?
+  read       Boolean  @default(false)
+  targetType String?
+  targetId   String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model QuoteRequest {
+  id                  String      @id @default(cuid())
+  customerId          String
+  type                QuoteType
+  productId           String?
+  status              QuoteStatus @default(PENDING_REVIEW)
+  title               String
+  description         String
+  quantity            Int
+  requestedDimensions String?
+  requestedMaterial   String?
+  requestedColor      String?
+  requestedFinish     String?
+  deliveryDistrict    String?
+  referenceImages     Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  customer    User              @relation(fields: [customerId], references: [id])
+  product     Product?          @relation(fields: [productId], references: [id])
+  resolutions QuoteResolution[]
+}
+
+model QuoteResolution {
+  id                String    @id @default(cuid())
+  quoteRequestId    String
+  producerId        String
+  finalTitle        String
+  finalDescription  String
+  finalPrice        Decimal   @db.Decimal(12, 2)
+  deliveryTime      String
+  notes             String?
+  validUntil        DateTime?
+  createdAt         DateTime  @default(now())
+
+  quoteRequest QuoteRequest @relation(fields: [quoteRequestId], references: [id])
+  producer     Producer     @relation(fields: [producerId], references: [id])
+}
+
+model CommissionConfig {
+  id          String   @id @default(cuid())
+  percentage  Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
