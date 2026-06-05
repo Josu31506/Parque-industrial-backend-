@@ -29,12 +29,12 @@ export class PurchaseRequestsService {
       include: { product: true },
     });
 
-    const requestItems = cartItems.filter((item) => item.product.availabilityType !== AvailabilityType.IN_STOCK);
+    const requestItems = cartItems.filter((item) =>
+      item.product.requiresConfirmation
+      || item.product.availabilityType === AvailabilityType.MADE_TO_ORDER,
+    );
     if (!requestItems.length) {
-      throw new BadRequestException('No hay productos bajo pedido para solicitar compra.');
-    }
-    if (requestItems.some((item) => item.product.availabilityType === AvailabilityType.CUSTOM_QUOTE)) {
-      throw new BadRequestException('Los productos CUSTOM_QUOTE deben ir por flujo de cotizacion.');
+      throw new BadRequestException('No hay productos que requieran confirmacion para solicitar compra.');
     }
 
     const data = this.factory.buildFromCart(customerId, requestItems);

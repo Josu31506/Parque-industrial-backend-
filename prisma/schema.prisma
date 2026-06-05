@@ -168,19 +168,21 @@ model Producer {
 }
 
 model Category {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
-  slug        String    @unique
+  slug        String   @unique
   description String?
   icon        String?
+  imageUrl    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  products Product[]
+  products    Product[]
 }
 
 model Product {
   id                    String           @id @default(cuid())
+  slug                  String           @unique
   producerId            String
   categoryId            String
   title                 String
@@ -193,6 +195,7 @@ model Product {
   availabilityType      AvailabilityType
   stock                 Int?
   estimatedDispatchDays Int?
+  requiresConfirmation  Boolean          @default(false)
   dimensions            String?
   materials             String?
   colors                Json?

@@ -3,6 +3,11 @@ import { AvailabilityType, ProductType } from '@prisma/client';
 import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 
 export class CreateProductDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
   @ApiProperty()
   @IsString()
   producerId: string;
@@ -51,6 +56,11 @@ export class CreateProductDto {
   @IsOptional()
   @IsNumber()
   estimatedDispatchDays?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  requiresConfirmation?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
