@@ -1,15 +1,27 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsDate, IsOptional, IsString } from 'class-validator';
 
 export class ConfirmPurchaseRequestGroupDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @Type(() => Date)
   @IsDate()
-  readyDate: Date;
+  readyDate?: Date;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  estimatedReadyDate?: Date;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   observation?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  sellerComment?: string;
 }

@@ -29,6 +29,12 @@ export class PurchaseRequestsController {
     return this.service.findMy(user.sub);
   }
 
+  @Roles(Role.SELLER)
+  @Get('seller')
+  seller(@CurrentUser() user: { sub: string }) {
+    return this.service.findForSeller(user.sub);
+  }
+
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
   @Get(':id')
   one(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {

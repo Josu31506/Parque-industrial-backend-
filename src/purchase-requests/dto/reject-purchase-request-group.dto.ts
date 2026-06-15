@@ -5,5 +5,10 @@ export class RejectPurchaseRequestGroupDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  reason?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   observation?: string;
 }

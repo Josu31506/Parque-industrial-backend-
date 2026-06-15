@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { AvailabilityType, FundsStatus, OrderStatus, PaymentStatus, Prisma, PurchaseRequestGroupStatus, PurchaseRequestStatus, Role, SaleStatus } from '@prisma/client';
 import { CommissionService } from '../commission/commission.service';
+import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentStrategyService } from '../payments/payment-strategy.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +22,7 @@ export class PurchaseRequestsService {
     private readonly paymentStrategy: PaymentStrategyService,
     private readonly commissionService: CommissionService,
     private readonly notifications: NotificationsService,
+    private readonly mail: MailService,
   ) {}
 
   async createFromCart(customerId: string) {
@@ -67,6 +69,49 @@ export class PurchaseRequestsService {
     });
   }
 
+  async findForSeller(sellerId: string) {
+    const producer = await this.prisma.producer.findUniqueOrThrow({
+      where: { userId: sellerId },
+      select: { id: true },
+    });
+
+    const groups = await this.prisma.purchaseRequestGroup.findMany({
+      where: { producerId: producer.id },
+      include: {
+        purchaseRequest: {
+          include: {
+            items: {
+              where: { producerId: producer.id },
+              include: { product: { select: { title: true, dimensions: true, materials: true, colors: true, finish: true } } },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return groups.flatMap((group) =>
+      group.purchaseRequest.items.map((item) => ({
+        groupId: group.id,
+        producerId: group.producerId,
+        productTitle: item.product?.title ?? 'Producto no disponible',
+        quantity: item.quantity,
+        status: group.status,
+        deliveryDistrict: null,
+        requestedAt: group.purchaseRequest.createdAt,
+        notes: group.observation ?? null,
+        estimatedReadyDate: group.readyDate,
+        sellerComment: group.observation ?? null,
+        productDetails: {
+          dimensions: item.product?.dimensions ?? null,
+          materials: item.product?.materials ?? null,
+          colors: item.product?.colors ?? null,
+          finish: item.product?.finish ?? null,
+        },
+      })),
+    );
+  }
+
   async findOne(id: string, actor: { sub: string; role: string }) {
     const request = await this.prisma.purchaseRequest.findUniqueOrThrow({
       where: { id },
@@ -109,28 +154,34 @@ export class PurchaseRequestsService {
 
   async confirmGroup(groupId: string, sellerId: string, dto: ConfirmPurchaseRequestGroupDto) {
     const group = await this.ensureSellerOwnsGroup(groupId, sellerId);
+    const readyDate = dto.estimatedReadyDate ?? dto.readyDate;
+    if (!readyDate) throw new BadRequestException('La fecha estimada es obligatoria.');
+    const observation = dto.sellerComment ?? dto.observation;
     const updatedGroup = await this.prisma.purchaseRequestGroup.update({
       where: { id: groupId },
       data: {
         status: PurchaseRequestGroupStatus.CONFIRMED,
-        readyDate: dto.readyDate,
-        observation: dto.observation,
+        readyDate,
+        observation,
       },
     });
     await this.refreshRequestStatus(group.purchaseRequestId);
+    await this.notifyCustomerAboutGroupConfirmation(groupId, true, readyDate, observation);
     return updatedGroup;
   }
 
   async rejectGroup(groupId: string, sellerId: string, dto: RejectPurchaseRequestGroupDto) {
     const group = await this.ensureSellerOwnsGroup(groupId, sellerId);
+    const reason = dto.reason ?? dto.observation;
     const updatedGroup = await this.prisma.purchaseRequestGroup.update({
       where: { id: groupId },
       data: {
         status: PurchaseRequestGroupStatus.REJECTED,
-        observation: dto.observation,
+        observation: reason,
       },
     });
     await this.refreshRequestStatus(group.purchaseRequestId);
+    await this.notifyCustomerAboutGroupConfirmation(groupId, false, null, reason);
     return updatedGroup;
   }
 
@@ -221,6 +272,60 @@ export class PurchaseRequestsService {
     });
     if (group.producer.userId !== sellerId) throw new ForbiddenException('No puedes gestionar este grupo.');
     return group;
+  }
+
+  private async notifyCustomerAboutGroupConfirmation(
+    groupId: string,
+    confirmed: boolean,
+    readyDate?: Date | null,
+    sellerComment?: string | null,
+  ) {
+    const group = await this.prisma.purchaseRequestGroup.findUniqueOrThrow({
+      where: { id: groupId },
+      include: {
+        purchaseRequest: {
+          include: { customer: { select: { id: true, name: true, email: true } } },
+        },
+      },
+    });
+    const items = await this.prisma.purchaseRequestItem.findMany({
+      where: { purchaseRequestId: group.purchaseRequestId, producerId: group.producerId },
+      include: { product: true },
+    });
+    const productName = items.map((item) => item.product.title).join(', ') || 'Producto solicitado';
+    const customer = group.purchaseRequest.customer;
+
+    if (confirmed) {
+      await this.notifications.createForUser(
+        customer.id,
+        'Solicitud confirmada',
+        'Tu solicitud fue confirmada. Ya puedes realizar el pago.',
+        'PURCHASE_REQUEST',
+        group.purchaseRequestId,
+      );
+      void this.mail.sendPurchaseRequestConfirmedEmail({
+        to: customer.email,
+        customerName: customer.name,
+        productName,
+        estimatedReadyDate: readyDate,
+        sellerComment,
+      });
+      return;
+    }
+
+    await this.notifications.createForUser(
+      customer.id,
+      'Solicitud rechazada',
+      'Una productora no pudo confirmar tu solicitud.',
+      'PURCHASE_REQUEST',
+      group.purchaseRequestId,
+    );
+    void this.mail.sendPurchaseRequestRejectedEmail({
+      to: customer.email,
+      customerName: customer.name,
+      productName,
+      reason: sellerComment,
+    });
   }
 
   private async refreshRequestStatus(purchaseRequestId: string) {

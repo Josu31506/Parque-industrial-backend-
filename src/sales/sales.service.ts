@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { OrderStatus, Role, SaleStatus } from '@prisma/client';
+import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,6 +9,7 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly mail: MailService,
   ) {}
 
   async findMySales(userId: string, role: string) {
@@ -76,6 +78,29 @@ export class SalesService {
       );
     }
 
+    if (status === SaleStatus.DISPATCHED) {
+      const orderSales = await this.prisma.sale.findMany({ where: { orderId: sale.orderId } });
+      const allDispatched = orderSales.every((entry) => entry.status === SaleStatus.DISPATCHED || entry.id === id);
+      if (allDispatched) {
+        await this.prisma.order.update({
+          where: { id: sale.orderId },
+          data: { status: OrderStatus.DISPATCHED },
+        });
+        await this.notifications.createForUser(
+          sale.order.customerId,
+          'Pedido despachado',
+          'Tu pedido fue despachado y ya puedes revisar el seguimiento.',
+          'ORDER',
+          sale.orderId,
+        );
+        void this.mail.sendOrderDispatchedEmail({
+          to: sale.order.customer.email,
+          customerName: sale.order.customer.name,
+          orderCode: sale.order.id,
+        });
+      }
+    }
+
     return updated;
   }
 
@@ -87,6 +112,12 @@ export class SalesService {
           select: {
             id: true,
             customerId: true,
+            customer: {
+              select: {
+                name: true,
+                email: true,
+              },
+            },
           },
         },
         producer: true,

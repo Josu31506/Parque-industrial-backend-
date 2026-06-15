@@ -38,6 +38,10 @@ export class AuthService {
     };
   }
 
+  registerClient(dto: RegisterDto) {
+    return this.register(dto);
+  }
+
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user?.isActive) throw new UnauthorizedException('Credenciales invalidas.');

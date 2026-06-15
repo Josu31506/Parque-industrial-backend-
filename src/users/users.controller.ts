@@ -22,6 +22,12 @@ export class UsersController {
   }
 
   @Roles(Role.ADMIN)
+  @Post('internal')
+  createInternal(@Body() dto: CreateUserDto) {
+    return this.usersService.create(dto);
+  }
+
+  @Roles(Role.ADMIN)
   @Post()
   create(@Body() dto: CreateUserDto) {
     return this.usersService.create(dto);
@@ -48,5 +54,11 @@ export class UsersController {
   @Patch(':id/deactivate')
   deactivate(@Param('id') id: string) {
     return this.usersService.deactivate(id);
+  }
+
+  @Roles(Role.ADMIN)
+  @Patch(':id/activate')
+  activate(@Param('id') id: string) {
+    return this.usersService.activate(id);
   }
 }

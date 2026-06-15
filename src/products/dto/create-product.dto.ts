@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AvailabilityType, ProductType } from '@prisma/client';
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
 
 export class CreateProductDto {
   @ApiPropertyOptional()
@@ -25,8 +26,10 @@ export class CreateProductDto {
   description: string;
 
   @ApiProperty()
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2, allowInfinity: false, allowNaN: false })
+  @Min(0.01)
+  @Max(999999.99)
   numericPrice: number;
 
   @ApiProperty()
@@ -48,12 +51,14 @@ export class CreateProductDto {
 
   @ApiPropertyOptional()
   @ValidateIf((dto: CreateProductDto) => dto.availabilityType === AvailabilityType.IN_STOCK)
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   stock?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   estimatedDispatchDays?: number;
 
@@ -87,4 +92,9 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   customizable?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

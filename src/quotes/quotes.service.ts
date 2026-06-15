@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, QuoteStatus, Role } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
@@ -10,6 +12,8 @@ export class QuotesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
   ) {}
 
   async create(customerId: string, dto: CreateQuoteDto) {
@@ -53,11 +57,33 @@ export class QuotesService {
         validUntil: dto.validUntil,
       },
     });
-    await this.prisma.quoteRequest.update({ where: { id }, data: { status: QuoteStatus.RESOLUTION_SENT } });
+    const quote = await this.prisma.quoteRequest.update({
+      where: { id },
+      data: { status: QuoteStatus.RESOLUTION_SENT },
+      include: { customer: { select: { id: true, name: true, email: true } } },
+    });
+    await this.notifications.createForUser(
+      quote.customerId,
+      'Cotizacion respondida',
+      'Ya tenemos una respuesta para tu cotizacion.',
+      'QUOTE',
+      quote.id,
+    );
+    void this.mail.sendQuoteResolvedEmail({
+      to: quote.customer.email,
+      customerName: quote.customer.name,
+      quoteTitle: quote.title,
+      quoteUrl: this.frontendUrl('/quotes'),
+    });
     return resolution;
   }
 
   addToCart(id: string) {
     return this.prisma.quoteRequest.update({ where: { id }, data: { status: QuoteStatus.ADDED_TO_CART } });
+  }
+
+  private frontendUrl(path: string) {
+    const baseUrl = this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
+    return `${baseUrl.replace(/\/$/, '')}${path}`;
   }
 }

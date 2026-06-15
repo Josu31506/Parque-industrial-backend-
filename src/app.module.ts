@@ -7,6 +7,7 @@ import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ClaimsModule } from './claims/claims.module';
 import { CommissionModule } from './commission/commission.module';
+import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -17,6 +18,7 @@ import { PurchaseRequestsModule } from './purchase-requests/purchase-requests.mo
 import { QuotesModule } from './quotes/quotes.module';
 import { RolesModule } from './roles/roles.module';
 import { SalesModule } from './sales/sales.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -44,6 +46,8 @@ import { UsersModule } from './users/users.module';
     QuotesModule,
     PaymentsModule,
     CommissionModule,
+    MailModule,
+    UploadsModule,
   ],
   providers: [
     {
