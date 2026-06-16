@@ -108,6 +108,15 @@ export class InvitationsService {
       return createdUser;
     });
 
+    void this.mail.sendWelcomeEmail({
+      to: user.email,
+      customerName: user.name,
+      role: user.role,
+    }).catch((error) => this.logger.error(
+      `No se pudo enviar bienvenida a ${user.email}.`,
+      error instanceof Error ? error.message : String(error),
+    ));
+
     return {
       accessToken: await this.jwt.signAsync({ sub: user.id, email: user.email, role: user.role }),
       user,
@@ -150,6 +159,7 @@ export class InvitationsService {
     email: string;
     role: Role;
     token: string;
+    expiresAt?: Date;
     producer?: { businessName: string } | null;
   }) {
     try {
@@ -159,6 +169,7 @@ export class InvitationsService {
         role,
         invitationUrl: this.frontendUrl(`/accept-invitation?token=${invitation.token}`),
         producerName: invitation.producer?.businessName,
+        expiresAt: invitation.expiresAt,
       });
     } catch (error) {
       this.logger.error(

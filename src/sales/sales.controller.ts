@@ -41,6 +41,7 @@ export class SalesController {
     return this.salesService.markDispatched(id, user.sub, user.role);
   }
 
+  @Roles(Role.ADMIN)
   @Patch(':id/delivered')
   delivered(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {
     return this.salesService.markDelivered(id, user.sub, user.role);

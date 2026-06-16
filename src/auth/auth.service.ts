@@ -1,18 +1,22 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -31,6 +35,15 @@ export class AuthService {
       },
       select: this.safeUserSelect(),
     });
+
+    void this.mail.sendWelcomeEmail({
+      to: user.email,
+      customerName: user.name,
+      role: user.role,
+    }).catch((error) => this.logger.error(
+      `No se pudo enviar bienvenida a ${user.email}.`,
+      error instanceof Error ? error.message : String(error),
+    ));
 
     return {
       accessToken: await this.signToken(user.id, user.email, user.role),

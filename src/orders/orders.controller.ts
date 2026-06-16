@@ -40,7 +40,7 @@ export class OrdersController {
     return this.ordersService.tracking(id, user);
   }
 
-  @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
+  @Roles(Role.CLIENT, Role.ADMIN)
   @Patch(':id/mark-delivered')
   delivered(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {
     return this.ordersService.markDelivered(id, user);

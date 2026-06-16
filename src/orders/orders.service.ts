@@ -1,20 +1,23 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { AvailabilityType, FundsStatus, OrderStatus, PaymentOption, PaymentStatus, Prisma, Role, SaleStatus } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { AvailabilityType, FundsStatus, OrderItemStatus, OrderStatus, PaymentOption, PaymentStatus, Prisma, Role, SaleStatus } from '@prisma/client';
 import { CommissionService } from '../commission/commission.service';
 import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
 import { getPagination, paginatedResponse } from '../common/utils/pagination';
+import { MailService } from '../mail/mail.service';
 import { PaymentStrategyService } from '../payments/payment-strategy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckoutOrderDto } from './dto/checkout-order.dto';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private readonly devTimers = new Map<string, number[]>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly commissionService: CommissionService,
     private readonly paymentStrategy: PaymentStrategyService,
+    private readonly mail: MailService,
   ) {}
 
   async findMyOrders(userId: string, query: SmallPaginationQueryDto) {
@@ -60,6 +63,7 @@ export class OrdersService {
 
       return {
         id: order.id,
+        orderNumber: order.orderNumber,
         status: order.status,
         createdAt: order.createdAt,
         estimatedDeliveryDate: order.estimatedDeliveryDate,
@@ -212,18 +216,65 @@ export class OrdersService {
       });
       this.timeEnd('checkout-transaction');
 
-      return this.prisma.order.findUniqueOrThrow({
+      const createdOrder = await this.prisma.order.findUniqueOrThrow({
         where: { id: order.id },
         include: this.orderInclude(),
       });
+      this.sendOrderStatusEmailInBackground(createdOrder.id, {
+        statusLabel: 'Pedido confirmado',
+        title: 'Pedido confirmado',
+        intro: 'Tu pedido fue registrado correctamente y el pago quedará retenido por la plataforma hasta la entrega conforme.',
+      });
+
+      return createdOrder;
     } finally {
       this.timeEnd('checkout-total');
     }
   }
 
   async markDelivered(id: string, actor: { sub: string; role: string }) {
-    await this.findOne(id, actor);
-    return this.prisma.order.update({ where: { id }, data: { status: OrderStatus.DELIVERED } });
+    const order = await this.findOne(id, actor);
+
+    if (actor.role === Role.CLIENT && order.status !== OrderStatus.DISPATCHED) {
+      throw new BadRequestException('Solo puedes confirmar recepcion cuando el pedido esta en camino.');
+    }
+
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id },
+        data: { status: OrderStatus.DELIVERED },
+      });
+
+      await tx.sale.updateMany({
+        where: { orderId: id },
+        data: { status: SaleStatus.DELIVERED },
+      });
+
+      await tx.saleItem.updateMany({
+        where: { sale: { orderId: id } },
+        data: { status: OrderItemStatus.DELIVERED },
+      });
+
+      await tx.orderItem.updateMany({
+        where: { orderId: id },
+        data: { status: OrderItemStatus.DELIVERED },
+      });
+
+      return tx.order.findUniqueOrThrow({
+        where: { id },
+        include: this.orderInclude(),
+      });
+    });
+
+    if (order.status !== OrderStatus.DELIVERED) {
+      this.sendOrderStatusEmailInBackground(id, {
+        statusLabel: 'Entregado',
+        title: 'Pedido entregado',
+        intro: 'Gracias por confirmar la recepción de tu pedido.',
+      });
+    }
+
+    return updatedOrder;
   }
 
   async close(id: string, actor: { sub: string; role: string }) {
@@ -262,6 +313,65 @@ export class OrdersService {
         },
       },
     } satisfies Prisma.OrderInclude;
+  }
+
+  private async getOrderEmailSummary(orderId: string) {
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        estimatedDeliveryDate: true,
+        total: true,
+        customer: { select: { name: true, email: true } },
+        items: {
+          select: {
+            quantity: true,
+            unitPrice: true,
+            totalPrice: true,
+            product: { select: { title: true } },
+            producer: { select: { businessName: true } },
+          },
+        },
+      },
+    });
+
+    return {
+      to: order.customer.email,
+      customerName: order.customer.name,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      estimatedDeliveryDate: order.estimatedDeliveryDate,
+      total: String(order.total),
+      items: order.items.map((item) => ({
+        title: item.product.title,
+        quantity: item.quantity,
+        unitPrice: String(item.unitPrice),
+        totalPrice: String(item.totalPrice),
+        producerName: item.producer.businessName,
+      })),
+    };
+  }
+
+  private sendOrderStatusEmailInBackground(
+    orderId: string,
+    message: { statusLabel: string; title: string; intro: string },
+  ) {
+    void this.getOrderEmailSummary(orderId)
+      .then((summary) => this.mail.sendOrderStatusChangedEmail({
+        ...summary,
+        ...message,
+        trackingUrl: this.frontendUrl('/orders'),
+      }))
+      .catch((error) => this.logger.error(
+        `No se pudo enviar correo de estado para pedido ${orderId}.`,
+        error instanceof Error ? error.message : String(error),
+      ));
+  }
+
+  private frontendUrl(path: string): string {
+    const baseUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    return `${baseUrl.replace(/\/$/, '')}${path}`;
   }
 
   private timeStart(label: string) {

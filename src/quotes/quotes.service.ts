@@ -197,9 +197,14 @@ export class QuotesService {
     void this.mail.sendQuoteResolvedEmail({
       to: quote.customer.email,
       customerName: quote.customer.name,
+      quoteId: quote.id,
       quoteTitle: quote.title,
+      finalTitle: resolution.finalTitle,
+      finalPrice: String(resolution.finalPrice),
+      deliveryTime: resolution.deliveryTime,
+      notes: resolution.notes,
       quoteUrl: this.frontendUrl('/quotes'),
-    });
+    }).catch((error) => console.error('No se pudo enviar correo de cotizacion resuelta.', error));
     return resolution;
   }
 

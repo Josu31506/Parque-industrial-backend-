@@ -74,6 +74,8 @@ Compra directa: producto `IN_STOCK` -> carrito -> pago simulado -> pedido -> ven
 
 Compra bajo pedido: carrito -> solicitud de compra -> productor confirma/rechaza -> fecha estimada -> pago 100% o 50% -> pedido -> ventas.
 
+Tracking MVP: el productor prepara, marca listo para despacho y despacha. En esta fase no existe modulo de repartidores; la entrega final la confirma el cliente desde su pedido.
+
 Reclamos: cliente crea reclamo -> fondos de pedido/ventas pasan a `HELD_BY_CLAIM` -> admin/asesor resuelve.
 
 Cotizaciones: cliente crea solicitud -> asesor coordina -> resolucion -> futuro flujo de pago/pedido.

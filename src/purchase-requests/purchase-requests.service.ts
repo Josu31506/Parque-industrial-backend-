@@ -275,6 +275,8 @@ export class PurchaseRequestsService {
       return createdOrder;
     });
 
+    this.sendOrderConfirmedEmailInBackground(order.id);
+
     return order;
   }
 
@@ -303,28 +305,39 @@ export class PurchaseRequestsService {
     });
     const items = await this.prisma.purchaseRequestItem.findMany({
       where: { purchaseRequestId: group.purchaseRequestId, producerId: group.producerId },
-      include: { product: true },
+      include: { product: true, producer: true },
     });
     const productName = items.map((item) => item.product.title).join(', ') || 'Producto solicitado';
     const customer = group.purchaseRequest.customer;
+    const mailItems = items.map((item) => ({
+      title: item.product.title,
+      quantity: item.quantity,
+      unitPrice: String(item.unitPrice),
+      totalPrice: String(item.totalPrice),
+      producerName: item.producer.businessName,
+    }));
 
     if (confirmed) {
       void this.mail.sendPurchaseRequestConfirmedEmail({
         to: customer.email,
         customerName: customer.name,
+        requestId: group.purchaseRequestId,
+        items: mailItems,
         productName,
         estimatedReadyDate: readyDate,
         sellerComment,
-      });
+      }).catch((error) => console.error('No se pudo enviar correo de solicitud confirmada.', error));
       return;
     }
 
     void this.mail.sendPurchaseRequestRejectedEmail({
       to: customer.email,
       customerName: customer.name,
+      requestId: group.purchaseRequestId,
+      items: mailItems,
       productName,
       reason: sellerComment,
-    });
+    }).catch((error) => console.error('No se pudo enviar correo de solicitud rechazada.', error));
   }
 
   private async refreshRequestStatus(purchaseRequestId: string) {
@@ -346,5 +359,54 @@ export class PurchaseRequestsService {
     });
 
     return updated;
+  }
+
+  private async getOrderEmailSummary(orderId: string) {
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        estimatedDeliveryDate: true,
+        total: true,
+        customer: { select: { name: true, email: true } },
+        items: {
+          select: {
+            quantity: true,
+            unitPrice: true,
+            totalPrice: true,
+            product: { select: { title: true } },
+            producer: { select: { businessName: true } },
+          },
+        },
+      },
+    });
+
+    return {
+      to: order.customer.email,
+      customerName: order.customer.name,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      estimatedDeliveryDate: order.estimatedDeliveryDate,
+      total: String(order.total),
+      items: order.items.map((item) => ({
+        title: item.product.title,
+        quantity: item.quantity,
+        unitPrice: String(item.unitPrice),
+        totalPrice: String(item.totalPrice),
+        producerName: item.producer.businessName,
+      })),
+    };
+  }
+
+  private sendOrderConfirmedEmailInBackground(orderId: string) {
+    void this.getOrderEmailSummary(orderId)
+      .then((summary) => this.mail.sendOrderStatusChangedEmail({
+        ...summary,
+        statusLabel: 'Pedido confirmado',
+        title: 'Pedido confirmado',
+        intro: 'Tu pedido fue registrado correctamente y el pago quedará retenido por la plataforma hasta la entrega conforme.',
+      }))
+      .catch((error) => console.error('No se pudo enviar correo de pedido confirmado.', error));
   }
 }
