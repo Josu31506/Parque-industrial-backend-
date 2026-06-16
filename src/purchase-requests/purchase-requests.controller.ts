@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -25,14 +26,14 @@ export class PurchaseRequestsController {
 
   @Roles(Role.CLIENT)
   @Get('my')
-  my(@CurrentUser() user: { sub: string }) {
-    return this.service.findMy(user.sub);
+  my(@CurrentUser() user: { sub: string }, @Query() query: SmallPaginationQueryDto) {
+    return this.service.findMy(user.sub, query);
   }
 
   @Roles(Role.SELLER)
   @Get('seller')
-  seller(@CurrentUser() user: { sub: string }) {
-    return this.service.findForSeller(user.sub);
+  seller(@CurrentUser() user: { sub: string }, @Query() query: SmallPaginationQueryDto) {
+    return this.service.findForSeller(user.sub, query);
   }
 
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)

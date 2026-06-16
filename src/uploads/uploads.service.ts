@@ -1,9 +1,15 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 
 const MAX_PRODUCT_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_PRODUCT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const PRODUCT_IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 @Injectable()
 export class UploadsService {
@@ -60,6 +66,10 @@ export class UploadsService {
       throw new BadRequestException('Solo se permiten imagenes JPG, PNG o WEBP.');
     }
 
+    if (!this.hasValidImageSignature(file)) {
+      throw new BadRequestException('El archivo no coincide con un formato de imagen permitido.');
+    }
+
     if (file.size > MAX_PRODUCT_IMAGE_SIZE) {
       throw new BadRequestException('La imagen no debe superar 5 MB.');
     }
@@ -67,12 +77,12 @@ export class UploadsService {
 
   private buildProductImagePath(file: Express.Multer.File, userId: string) {
     const normalizedName = this.normalizeFileName(file.originalname);
-    return `products/${userId}/${Date.now()}-${normalizedName}`;
+    const extension = PRODUCT_IMAGE_EXTENSIONS[file.mimetype] ?? 'jpg';
+    return `products/${userId}/${randomUUID()}-${normalizedName}.${extension}`;
   }
 
   private normalizeFileName(fileName: string) {
-    const [rawName, ...extensionParts] = fileName.split('.');
-    const extension = extensionParts.pop()?.toLowerCase();
+    const rawName = fileName.split('.')[0];
     const safeName = rawName
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -81,6 +91,37 @@ export class UploadsService {
       .replace(/(^-|-$)/g, '')
       .slice(0, 80) || 'producto';
 
-    return extension ? `${safeName}.${extension}` : safeName;
+    return safeName;
+  }
+
+  private hasValidImageSignature(file: Express.Multer.File) {
+    const buffer = file.buffer;
+
+    if (file.mimetype === 'image/jpeg') {
+      return buffer.length >= 3
+        && buffer[0] === 0xff
+        && buffer[1] === 0xd8
+        && buffer[2] === 0xff;
+    }
+
+    if (file.mimetype === 'image/png') {
+      return buffer.length >= 8
+        && buffer[0] === 0x89
+        && buffer[1] === 0x50
+        && buffer[2] === 0x4e
+        && buffer[3] === 0x47
+        && buffer[4] === 0x0d
+        && buffer[5] === 0x0a
+        && buffer[6] === 0x1a
+        && buffer[7] === 0x0a;
+    }
+
+    if (file.mimetype === 'image/webp') {
+      return buffer.length >= 12
+        && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+        && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+    }
+
+    return false;
   }
 }

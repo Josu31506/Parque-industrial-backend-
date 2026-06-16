@@ -119,6 +119,13 @@ enum QuoteType {
   REFERENCE_IMAGE
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
 enum OrderItemStatus {
   PENDING
   IN_PREPARATION
@@ -145,6 +152,7 @@ model User {
   claims            Claim[]
   notifications     Notification[]
   quoteRequests     QuoteRequest[]
+  sentInvitations   Invitation[]      @relation("InvitedBy")
 }
 
 model Producer {
@@ -166,6 +174,7 @@ model Producer {
   orderItems              OrderItem[]
   sales                   Sale[]
   quoteResolutions        QuoteResolution[]
+  invitations             Invitation[]
 }
 
 model Category {
@@ -227,6 +236,8 @@ model CartItem {
   product Product @relation(fields: [productId], references: [id])
 
   @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
 }
 
 model PurchaseRequest {
@@ -418,4 +429,24 @@ model CommissionConfig {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model Invitation {
+  id          String           @id @default(cuid())
+  email       String
+  role        Role
+  token       String           @unique
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  invitedById String
+  producerId  String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  invitedBy User      @relation("InvitedBy", fields: [invitedById], references: [id])
+  producer  Producer? @relation(fields: [producerId], references: [id])
+
+  @@index([email])
+  @@index([status])
 }

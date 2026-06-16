@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -16,8 +17,8 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Get('my')
-  my(@CurrentUser() user: { sub: string; role: string }) {
-    return this.salesService.findMySales(user.sub, user.role);
+  my(@CurrentUser() user: { sub: string; role: string }, @Query() query: SmallPaginationQueryDto) {
+    return this.salesService.findMySales(user.sub, user.role, query);
   }
 
   @Get(':id')

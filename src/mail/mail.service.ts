@@ -82,25 +82,29 @@ export class MailService {
 
   async sendInvitationEmail(params: {
     to: string;
-    role: 'SELLER' | 'ADVISOR';
+    role: 'SELLER' | 'ADVISOR' | 'ADMIN';
     invitationUrl: string;
     producerName?: string;
   }): Promise<void> {
-    const roleLabel = params.role === 'SELLER' ? 'Trabajador/Productor' : 'Asesor';
+    const roleLabel = params.role === 'SELLER'
+      ? 'Trabajador/Productor'
+      : params.role === 'ADVISOR'
+        ? 'Asesor'
+        : 'Administrador';
     await this.sendMail({
       to: params.to,
       subject: 'Invitacion a Parque Industrial Conecta',
       text: [
-        `Has sido invitado como ${roleLabel}.`,
+        `Has sido invitado a Parque Industrial Conecta con el rol: ${roleLabel}.`,
         params.producerName ? `Productora asociada: ${params.producerName}` : '',
-        `Acepta tu invitacion aqui: ${params.invitationUrl}`,
+        `Completa tu registro en el siguiente enlace: ${params.invitationUrl}`,
       ].filter(Boolean).join('\n'),
       html: this.renderTemplate({
         title: 'Invitacion a Parque Industrial Conecta',
-        intro: `Has sido invitado como ${roleLabel}.`,
+        intro: `Has sido invitado a Parque Industrial Conecta con el rol: ${roleLabel}.`,
         paragraphs: [
           params.producerName ? `Productora asociada: ${params.producerName}` : '',
-          'Abre el enlace para definir tu acceso y empezar a trabajar con la plataforma.',
+          'Completa tu registro en el siguiente enlace. No se ha generado ninguna contrasena temporal.',
         ].filter(Boolean),
         ctaLabel: 'Aceptar invitacion',
         ctaUrl: params.invitationUrl,

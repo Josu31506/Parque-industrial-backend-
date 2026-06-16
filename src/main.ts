@@ -10,12 +10,16 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
   const frontendUrl = config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
+  const httpAdapter = app.getHttpAdapter().getInstance() as { disable?: (setting: string) => void };
 
   app.setGlobalPrefix('api');
+  httpAdapter.disable?.('x-powered-by');
   app.use(helmet());
   app.enableCors({
     origin: frontendUrl,
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
   app.useGlobalPipes(
     new ValidationPipe({

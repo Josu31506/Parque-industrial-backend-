@@ -7,6 +7,7 @@ import { CartModule } from './cart/cart.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ClaimsModule } from './claims/claims.module';
 import { CommissionModule } from './commission/commission.module';
+import { InvitationsModule } from './invitations/invitations.module';
 import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrdersModule } from './orders/orders.module';
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     QuotesModule,
     PaymentsModule,
     CommissionModule,
+    InvitationsModule,
     MailModule,
     UploadsModule,
   ],

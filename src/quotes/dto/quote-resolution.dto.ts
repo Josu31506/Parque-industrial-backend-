@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsDate, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class QuoteResolutionDto {
   @ApiProperty()
@@ -16,8 +16,10 @@ export class QuoteResolutionDto {
   finalDescription: string;
 
   @ApiProperty()
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2, allowInfinity: false, allowNaN: false })
+  @Min(0.01)
+  @Max(999999.99)
   finalPrice: number;
 
   @ApiProperty()

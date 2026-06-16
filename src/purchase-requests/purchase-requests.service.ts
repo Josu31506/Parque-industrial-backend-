@@ -1,8 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { AvailabilityType, FundsStatus, OrderStatus, PaymentStatus, Prisma, PurchaseRequestGroupStatus, PurchaseRequestStatus, Role, SaleStatus } from '@prisma/client';
 import { CommissionService } from '../commission/commission.service';
+import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
+import { getPagination, paginatedResponse } from '../common/utils/pagination';
 import { MailService } from '../mail/mail.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentStrategyService } from '../payments/payment-strategy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfirmPurchaseRequestGroupDto } from './dto/confirm-purchase-request-group.dto';
@@ -21,7 +22,6 @@ export class PurchaseRequestsService {
     private readonly deliveryDateCalculator: DeliveryDateCalculator,
     private readonly paymentStrategy: PaymentStrategyService,
     private readonly commissionService: CommissionService,
-    private readonly notifications: NotificationsService,
     private readonly mail: MailService,
   ) {}
 
@@ -55,42 +55,56 @@ export class PurchaseRequestsService {
       return created;
     });
 
-    await this.notifications.createForUser(customerId, 'Solicitud enviada', 'Tu solicitud fue enviada a los productores.', 'PURCHASE_REQUEST', request.id);
-    await this.notifications.createForRole(Role.SELLER, 'Nueva solicitud de venta', 'Tienes una solicitud pendiente de confirmacion.', 'PURCHASE_REQUEST', request.id);
-
     return request;
   }
 
-  findMy(customerId: string) {
-    return this.prisma.purchaseRequest.findMany({
-      where: { customerId },
-      include: { items: { include: { product: true, producer: true } }, groups: { include: { producer: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findMy(customerId: string, query: SmallPaginationQueryDto) {
+    const { page, limit, skip } = getPagination(query.page, query.limit);
+    const where: Prisma.PurchaseRequestWhereInput = { customerId };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.purchaseRequest.findMany({
+        where,
+        include: { items: { include: { product: true, producer: true } }, groups: { include: { producer: true } } },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.purchaseRequest.count({ where }),
+    ]);
+
+    return paginatedResponse(items, total, page, limit);
   }
 
-  async findForSeller(sellerId: string) {
+  async findForSeller(sellerId: string, query: SmallPaginationQueryDto) {
     const producer = await this.prisma.producer.findUniqueOrThrow({
       where: { userId: sellerId },
       select: { id: true },
     });
+    const { page, limit, skip } = getPagination(query.page, query.limit);
+    const where: Prisma.PurchaseRequestGroupWhereInput = { producerId: producer.id };
 
-    const groups = await this.prisma.purchaseRequestGroup.findMany({
-      where: { producerId: producer.id },
-      include: {
-        purchaseRequest: {
-          include: {
-            items: {
-              where: { producerId: producer.id },
-              include: { product: { select: { title: true, dimensions: true, materials: true, colors: true, finish: true } } },
+    const [groups, total] = await this.prisma.$transaction([
+      this.prisma.purchaseRequestGroup.findMany({
+        where,
+        include: {
+          purchaseRequest: {
+            include: {
+              items: {
+                where: { producerId: producer.id },
+                include: { product: { select: { title: true, dimensions: true, materials: true, colors: true, finish: true } } },
+              },
             },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.purchaseRequestGroup.count({ where }),
+    ]);
 
-    return groups.flatMap((group) =>
+    const items = groups.flatMap((group) =>
       group.purchaseRequest.items.map((item) => ({
         groupId: group.id,
         producerId: group.producerId,
@@ -110,6 +124,8 @@ export class PurchaseRequestsService {
         },
       })),
     );
+
+    return paginatedResponse(items, total, page, limit);
   }
 
   async findOne(id: string, actor: { sub: string; role: string }) {
@@ -259,9 +275,6 @@ export class PurchaseRequestsService {
       return createdOrder;
     });
 
-    await this.notifications.createForUser(customerId, 'Pago registrado', 'Tu pedido fue creado y el pago queda retenido por la plataforma.', 'ORDER', order.id);
-    await this.notifications.createForRole(Role.SELLER, 'Nueva venta confirmada', 'Tienes una nueva venta por preparar.', 'SALE', order.id);
-
     return order;
   }
 
@@ -296,13 +309,6 @@ export class PurchaseRequestsService {
     const customer = group.purchaseRequest.customer;
 
     if (confirmed) {
-      await this.notifications.createForUser(
-        customer.id,
-        'Solicitud confirmada',
-        'Tu solicitud fue confirmada. Ya puedes realizar el pago.',
-        'PURCHASE_REQUEST',
-        group.purchaseRequestId,
-      );
       void this.mail.sendPurchaseRequestConfirmedEmail({
         to: customer.email,
         customerName: customer.name,
@@ -313,13 +319,6 @@ export class PurchaseRequestsService {
       return;
     }
 
-    await this.notifications.createForUser(
-      customer.id,
-      'Solicitud rechazada',
-      'Una productora no pudo confirmar tu solicitud.',
-      'PURCHASE_REQUEST',
-      group.purchaseRequestId,
-    );
     void this.mail.sendPurchaseRequestRejectedEmail({
       to: customer.email,
       customerName: customer.name,
@@ -345,10 +344,6 @@ export class PurchaseRequestsService {
       where: { id: purchaseRequestId },
       data: { status, estimatedDeliveryDate },
     });
-
-    if (status === PurchaseRequestStatus.READY_TO_PAY) {
-      await this.notifications.createForUser(request.customerId, 'Solicitud lista para pago', 'Todos los productores confirmaron disponibilidad.', 'PURCHASE_REQUEST', request.id);
-    }
 
     return updated;
   }

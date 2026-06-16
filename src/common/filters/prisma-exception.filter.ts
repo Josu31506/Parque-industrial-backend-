@@ -31,6 +31,11 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         message = 'Error de relación entre registros';
         break;
 
+      case 'P2021':
+        status = HttpStatus.INTERNAL_SERVER_ERROR;
+        message = 'Tabla de base de datos no encontrada. Revisa que las migraciones Prisma esten aplicadas.';
+        break;
+
       default:
         status = HttpStatus.INTERNAL_SERVER_ERROR;
         message = 'Error interno de base de datos';
@@ -40,7 +45,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     return response.status(status).json({
       statusCode: status,
       message,
-      prismaCode: exception.code,
+      ...(process.env.NODE_ENV === 'production' ? {} : { prismaCode: exception.code }),
       timestamp: new Date().toISOString(),
     });
   }

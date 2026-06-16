@@ -2,12 +2,16 @@ import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/com
 import { AvailabilityType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { generateSlug } from '../common/utils/generate-slug';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { getPagination, paginatedResponse } from '../common/utils/pagination';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
 @Injectable()
 export class ProductsService {
+  private readonly devTimers = new Map<string, number[]>();
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateProductDto, actor: { sub: string; role: string }) {
@@ -21,6 +25,7 @@ export class ProductsService {
       return await this.prisma.product.create({
         data: {
           ...dto,
+          producerId: producer.id,
           slug,
           price: new Prisma.Decimal(dto.numericPrice),
           colors: dto.colors ?? Prisma.JsonNull,
@@ -34,6 +39,7 @@ export class ProductsService {
   }
 
   async findAll(query: QueryProductsDto) {
+    this.timeStart('products-findAll');
     const where: Prisma.ProductWhereInput = {
       isActive: true,
       categoryId: query.categoryId,
@@ -51,21 +57,24 @@ export class ProductsService {
           ]
         : undefined,
     };
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 12;
+    const { page, limit, skip } = getPagination(query.page, query.limit);
 
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.product.findMany({
-        where,
-        include: { category: true, producer: true },
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: query.sort === 'price_asc' ? { numericPrice: 'asc' } : { createdAt: 'desc' },
-      }),
-      this.prisma.product.count({ where }),
-    ]);
+    try {
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.product.findMany({
+          where,
+          include: { category: true, producer: true },
+          skip,
+          take: limit,
+          orderBy: query.sort === 'price_asc' ? { numericPrice: 'asc' } : { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where }),
+      ]);
 
-    return { items, total, page, limit };
+      return paginatedResponse(items, total, page, limit);
+    } finally {
+      this.timeEnd('products-findAll');
+    }
   }
 
   findOne(id: string) {
@@ -73,6 +82,37 @@ export class ProductsService {
       where: { id },
       include: { category: true, producer: true },
     });
+  }
+
+  async findMy(actor: { sub: string; role: string }, query: PaginationQueryDto) {
+    this.timeStart('products-findMy');
+    try {
+      const where: Prisma.ProductWhereInput = {};
+      const { page, limit, skip } = getPagination(query.page, query.limit);
+
+      if (actor.role === Role.SELLER) {
+        const producer = await this.prisma.producer.findUniqueOrThrow({
+          where: { userId: actor.sub },
+          select: { id: true },
+        });
+        where.producerId = producer.id;
+      }
+
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.product.findMany({
+          where,
+          select: this.productListSelect(),
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where }),
+      ]);
+
+      return paginatedResponse(items, total, page, limit);
+    } finally {
+      this.timeEnd('products-findMy');
+    }
   }
 
   async update(id: string, dto: UpdateProductDto, actor: { sub: string; role: string }) {
@@ -102,6 +142,7 @@ export class ProductsService {
         where: { id },
         data: {
           ...dto,
+          producerId: producer.id,
           slug,
           price: dto.numericPrice === undefined ? undefined : new Prisma.Decimal(dto.numericPrice),
           colors: dto.colors === undefined ? undefined : dto.colors,
@@ -138,6 +179,10 @@ export class ProductsService {
   }
 
   private async ensureSellerCanUseProducer(producerId: string, actor: { sub: string; role: string }) {
+    if (actor.role === Role.SELLER) {
+      return this.prisma.producer.findUniqueOrThrow({ where: { userId: actor.sub } });
+    }
+
     const producer = await this.prisma.producer.findUniqueOrThrow({ where: { id: producerId } });
     this.ensureActorCanManageProducer(producer, actor);
     return producer;
@@ -177,11 +222,54 @@ export class ProductsService {
     } satisfies Prisma.ProductInclude;
   }
 
+  private productListSelect() {
+    return {
+      id: true,
+      slug: true,
+      producerId: true,
+      categoryId: true,
+      title: true,
+      description: true,
+      price: true,
+      numericPrice: true,
+      imageUrl: true,
+      badge: true,
+      type: true,
+      availabilityType: true,
+      stock: true,
+      estimatedDispatchDays: true,
+      requiresConfirmation: true,
+      dimensions: true,
+      materials: true,
+      colors: true,
+      finish: true,
+      customizable: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+      category: { select: { id: true, name: true } },
+      producer: { select: { id: true, businessName: true, type: true, location: true, description: true, rating: true, isApproved: true, userId: true } },
+    } satisfies Prisma.ProductSelect;
+  }
+
   private timeStart(label: string) {
-    if (process.env.NODE_ENV !== 'production') console.time(label);
+    if (process.env.NODE_ENV === 'production') return;
+    const stack = this.devTimers.get(label) ?? [];
+    stack.push(performance.now());
+    this.devTimers.set(label, stack);
   }
 
   private timeEnd(label: string) {
-    if (process.env.NODE_ENV !== 'production') console.timeEnd(label);
+    if (process.env.NODE_ENV === 'production') return;
+    const stack = this.devTimers.get(label);
+    const startedAt = stack?.pop();
+
+    if (startedAt === undefined) return;
+    if (!stack?.length) {
+      this.devTimers.delete(label);
+    }
+
+    const duration = performance.now() - startedAt;
+    console.log(`${label}: ${duration.toFixed(3)}ms`);
   }
 }

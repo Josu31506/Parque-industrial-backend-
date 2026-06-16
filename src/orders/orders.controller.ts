@@ -1,10 +1,12 @@
-import { Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { CheckoutOrderDto } from './dto/checkout-order.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -16,8 +18,14 @@ export class OrdersController {
 
   @Roles(Role.CLIENT)
   @Get('my')
-  my(@CurrentUser() user: { sub: string }) {
-    return this.ordersService.findMyOrders(user.sub);
+  my(@CurrentUser() user: { sub: string }, @Query() query: SmallPaginationQueryDto) {
+    return this.ordersService.findMyOrders(user.sub, query);
+  }
+
+  @Roles(Role.CLIENT)
+  @Post('checkout')
+  checkout(@CurrentUser() user: { sub: string }, @Body() dto: CheckoutOrderDto) {
+    return this.ordersService.checkoutCart(user.sub, dto);
   }
 
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)

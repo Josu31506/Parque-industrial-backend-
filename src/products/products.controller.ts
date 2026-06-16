@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -26,6 +27,14 @@ export class ProductsController {
   @Get()
   findAll(@Query() query: QueryProductsDto) {
     return this.productsService.findAll(query);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER, Role.ADMIN)
+  @Get('my')
+  findMy(@CurrentUser() user: { sub: string; role: string }, @Query() query: PaginationQueryDto) {
+    return this.productsService.findMy(user, query);
   }
 
   @Get(':id')

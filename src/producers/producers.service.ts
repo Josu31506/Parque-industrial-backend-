@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProducerDto } from './dto/create-producer.dto';
 import { UpdateProducerDto } from './dto/update-producer.dto';
@@ -15,13 +15,16 @@ export class ProducersService {
   findAll() {
     return this.prisma.producer.findMany({
       where: { isApproved: true },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      select: this.publicProducerSelect(),
       orderBy: { createdAt: 'desc' },
     });
   }
 
   findOne(id: string) {
-    return this.prisma.producer.findUniqueOrThrow({ where: { id } });
+    return this.prisma.producer.findUniqueOrThrow({
+      where: { id },
+      select: this.publicProducerSelect(),
+    });
   }
 
   products(id: string) {
@@ -39,5 +42,20 @@ export class ProducersService {
 
   approve(id: string) {
     return this.prisma.producer.update({ where: { id }, data: { isApproved: true } });
+  }
+
+  private publicProducerSelect() {
+    return {
+      id: true,
+      userId: true,
+      businessName: true,
+      type: true,
+      location: true,
+      description: true,
+      rating: true,
+      isApproved: true,
+      createdAt: true,
+      updatedAt: true,
+    } satisfies Prisma.ProducerSelect;
   }
 }

@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AvailabilityType, ProductType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class QueryProductsDto {
   @ApiPropertyOptional()
@@ -44,17 +44,17 @@ export class QueryProductsDto {
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
   page = 1;
 
-  @ApiPropertyOptional({ default: 12 })
+  @ApiPropertyOptional({ default: 20 })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
-  @Max(100)
-  limit = 12;
+  @Max(50)
+  limit = 20;
 
   @ApiPropertyOptional()
   @IsOptional()

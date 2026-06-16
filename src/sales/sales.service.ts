@@ -1,28 +1,46 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { OrderStatus, Role, SaleStatus } from '@prisma/client';
+import { OrderStatus, Prisma, Role, SaleStatus } from '@prisma/client';
+import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
+import { getPagination, paginatedResponse } from '../common/utils/pagination';
 import { MailService } from '../mail/mail.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly notifications: NotificationsService,
     private readonly mail: MailService,
   ) {}
 
-  async findMySales(userId: string, role: string) {
+  async findMySales(userId: string, role: string, query: SmallPaginationQueryDto) {
+    const { page, limit, skip } = getPagination(query.page, query.limit);
     if (role === Role.ADMIN) {
-      return this.prisma.sale.findMany({ include: { items: { include: { product: true } }, producer: true }, orderBy: { createdAt: 'desc' } });
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.sale.findMany({
+          include: { items: { include: { product: true } }, producer: true },
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.sale.count(),
+      ]);
+      return paginatedResponse(items, total, page, limit);
     }
 
     const producer = await this.prisma.producer.findUniqueOrThrow({ where: { userId } });
-    return this.prisma.sale.findMany({
-      where: { producerId: producer.id },
-      include: { items: { include: { product: true } }, order: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const where: Prisma.SaleWhereInput = { producerId: producer.id };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.sale.findMany({
+        where,
+        include: { items: { include: { product: true } }, order: true },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.sale.count({ where }),
+    ]);
+
+    return paginatedResponse(items, total, page, limit);
   }
 
   async findOne(id: string, userId: string, role: string) {
@@ -69,13 +87,6 @@ export class SalesService {
           data: { status: OrderStatus.READY_FOR_DISPATCH },
         });
       }
-      await this.notifications.createForUser(
-        sale.order.customerId,
-        'Venta lista para despacho',
-        'Un productor marco productos listos para despacho.',
-        'ORDER',
-        sale.orderId,
-      );
     }
 
     if (status === SaleStatus.DISPATCHED) {
@@ -86,13 +97,6 @@ export class SalesService {
           where: { id: sale.orderId },
           data: { status: OrderStatus.DISPATCHED },
         });
-        await this.notifications.createForUser(
-          sale.order.customerId,
-          'Pedido despachado',
-          'Tu pedido fue despachado y ya puedes revisar el seguimiento.',
-          'ORDER',
-          sale.orderId,
-        );
         void this.mail.sendOrderDispatchedEmail({
           to: sale.order.customer.email,
           customerName: sale.order.customer.name,

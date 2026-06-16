@@ -1,15 +1,11 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { ClaimStatus, FundsStatus, OrderStatus, Role, SaleStatus } from '@prisma/client';
-import { NotificationsService } from '../notifications/notifications.service';
+import { ClaimStatus, FundsStatus, OrderStatus, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 
 @Injectable()
 export class ClaimsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly notifications: NotificationsService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(customerId: string, dto: CreateClaimDto) {
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: dto.orderId } });
@@ -28,8 +24,6 @@ export class ClaimsService {
       return created;
     });
 
-    await this.notifications.createForRole(Role.ADMIN, 'Nuevo reclamo', 'Hay un reclamo abierto para revisar.', 'CLAIM', claim.id);
-    await this.notifications.createForRole(Role.ADVISOR, 'Nuevo reclamo', 'Hay un reclamo abierto para atender.', 'CLAIM', claim.id);
     return claim;
   }
 
@@ -38,11 +32,17 @@ export class ClaimsService {
   }
 
   findAll() {
-    return this.prisma.claim.findMany({ include: { order: true, customer: true }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.claim.findMany({
+      include: { order: true, customer: { select: this.safeCustomerSelect() } },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   findOne(id: string) {
-    return this.prisma.claim.findUniqueOrThrow({ where: { id }, include: { order: true, customer: true } });
+    return this.prisma.claim.findUniqueOrThrow({
+      where: { id },
+      include: { order: true, customer: { select: this.safeCustomerSelect() } },
+    });
   }
 
   updateStatus(id: string, status: ClaimStatus) {
@@ -53,5 +53,14 @@ export class ClaimsService {
         resolvedAt: status === ClaimStatus.RESOLVED || status === ClaimStatus.REJECTED ? new Date() : undefined,
       },
     });
+  }
+
+  private safeCustomerSelect() {
+    return {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+    };
   }
 }
