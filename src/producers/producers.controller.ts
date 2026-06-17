@@ -27,6 +27,22 @@ export class ProducersController {
     return this.producersService.findAll();
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  @Get('me')
+  me(@CurrentUser() user: { sub: string }) {
+    return this.producersService.findMe(user.sub);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SELLER)
+  @Patch('me')
+  updateMe(@Body() dto: UpdateProducerDto, @CurrentUser() user: { sub: string }) {
+    return this.producersService.updateMe(user.sub, dto);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.producersService.findOne(id);

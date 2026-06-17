@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ClaimStatus, FundsStatus, OrderStatus, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
@@ -10,6 +10,9 @@ export class ClaimsService {
   async create(customerId: string, dto: CreateClaimDto) {
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: dto.orderId } });
     if (order.customerId !== customerId) throw new ForbiddenException('No puedes reclamar este pedido.');
+    if (!this.canCreateClaim(order)) {
+      throw new BadRequestException('El plazo para reportar un problema sobre este pedido ha vencido.');
+    }
 
     const claim = await this.prisma.$transaction(async (tx) => {
       const created = await tx.claim.create({ data: { ...dto, customerId } });
@@ -62,5 +65,21 @@ export class ClaimsService {
       email: true,
       phone: true,
     };
+  }
+
+  private canCreateClaim(order: {
+    status: OrderStatus;
+    deliveredAt: Date | null;
+    claimDeadlineAt: Date | null;
+    fundsStatus: FundsStatus;
+  }) {
+    if (order.status === OrderStatus.CLOSED || order.fundsStatus === FundsStatus.RELEASED) {
+      return false;
+    }
+
+    if (!order.deliveredAt && order.status !== OrderStatus.DELIVERED) return true;
+    if (!order.claimDeadlineAt) return true;
+
+    return new Date() <= order.claimDeadlineAt;
   }
 }

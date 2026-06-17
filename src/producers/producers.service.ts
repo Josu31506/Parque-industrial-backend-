@@ -27,6 +27,13 @@ export class ProducersService {
     });
   }
 
+  findMe(userId: string) {
+    return this.prisma.producer.findUniqueOrThrow({
+      where: { userId },
+      select: this.publicProducerSelect(),
+    });
+  }
+
   products(id: string) {
     return this.prisma.product.findMany({ where: { producerId: id, isActive: true } });
   }
@@ -38,6 +45,15 @@ export class ProducersService {
     }
 
     return this.prisma.producer.update({ where: { id }, data: dto });
+  }
+
+  async updateMe(userId: string, dto: UpdateProducerDto) {
+    const producer = await this.prisma.producer.findUniqueOrThrow({ where: { userId }, select: { id: true } });
+    return this.prisma.producer.update({
+      where: { id: producer.id },
+      data: dto,
+      select: this.publicProducerSelect(),
+    });
   }
 
   approve(id: string) {
@@ -52,6 +68,13 @@ export class ProducersService {
       type: true,
       location: true,
       description: true,
+      imageUrl: true,
+      phone: true,
+      bankName: true,
+      bankAccountNumber: true,
+      bankAccountType: true,
+      cci: true,
+      accountHolderName: true,
       rating: true,
       isApproved: true,
       createdAt: true,

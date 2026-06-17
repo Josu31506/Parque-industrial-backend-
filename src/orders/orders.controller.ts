@@ -28,6 +28,12 @@ export class OrdersController {
     return this.ordersService.checkoutCart(user.sub, dto);
   }
 
+  @Roles(Role.ADMIN)
+  @Post('release-expired-claims')
+  releaseExpiredClaims() {
+    return this.ordersService.releaseExpiredClaims();
+  }
+
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
   @Get(':id')
   one(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { AvailabilityType } from '@prisma/client';
+import { AvailabilityType, Prisma, QuoteStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
@@ -17,6 +17,9 @@ const cartItemSummarySelect = {
   id: true,
   userId: true,
   productId: true,
+  quoteId: true,
+  titleSnapshot: true,
+  quotedPriceSnapshot: true,
   quantity: true,
   createdAt: true,
   updatedAt: true,
@@ -50,6 +53,27 @@ const cartItemWithProductSelect = {
       },
     },
   },
+  quote: {
+    select: {
+      id: true,
+      title: true,
+      quotedPrice: true,
+      quotedDeliveryDays: true,
+      sellerComment: true,
+      validUntil: true,
+      status: true,
+      product: {
+        select: {
+          id: true,
+          title: true,
+          imageUrl: true,
+          producerId: true,
+          producer: { select: { id: true, businessName: true } },
+        },
+      },
+      producer: { select: { id: true, businessName: true } },
+    },
+  },
 } as const;
 
 @Injectable()
@@ -77,6 +101,14 @@ export class CartService {
   async addItem(userId: string, dto: AddCartItemDto) {
     const endServiceTimer = startDevTimer('cart-service-add-item');
     try {
+      if ((!dto.productId && !dto.quoteId) || (dto.productId && dto.quoteId)) {
+        throw new BadRequestException('Debes enviar un producto o una cotizacion, pero no ambos.');
+      }
+
+      if (dto.quoteId) {
+        return await this.addQuoteItem(userId, dto.quoteId, dto.quantity);
+      }
+
       return await this.prisma.$transaction(async (tx) => {
         const endProductTimer = startDevTimer('prisma-cart-product-findFirst');
         const product = await tx.product.findFirstOrThrow({
@@ -94,8 +126,8 @@ export class CartService {
 
         const endUpsertTimer = startDevTimer('prisma-cart-upsert');
         const item = await tx.cartItem.upsert({
-          where: { userId_productId: { userId, productId: dto.productId } },
-          create: { userId, productId: dto.productId, quantity: dto.quantity },
+          where: { userId_productId: { userId, productId: dto.productId! } },
+          create: { userId, productId: dto.productId!, quantity: dto.quantity },
           update: { quantity: { increment: dto.quantity } },
           select: cartItemSummarySelect,
         }).finally(endUpsertTimer);
@@ -129,7 +161,7 @@ export class CartService {
         },
       }).finally(endFindTimer);
       if (item.userId !== userId) throw new ForbiddenException('No puedes modificar este item.');
-      if (item.product.availabilityType === AvailabilityType.IN_STOCK && (item.product.stock === null || dto.quantity > item.product.stock)) {
+      if (item.product?.availabilityType === AvailabilityType.IN_STOCK && (item.product.stock === null || dto.quantity > item.product.stock)) {
         throw new BadRequestException('Stock insuficiente.');
       }
 
@@ -168,5 +200,59 @@ export class CartService {
 
   clear(userId: string) {
     return this.prisma.cartItem.deleteMany({ where: { userId } });
+  }
+
+  private async addQuoteItem(userId: string, quoteId: string, quantity: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const quote = await tx.quoteRequest.findUniqueOrThrow({
+        where: { id: quoteId },
+        select: {
+          id: true,
+          customerId: true,
+          title: true,
+          quotedPrice: true,
+          validUntil: true,
+          status: true,
+          product: { select: { title: true } },
+        },
+      });
+
+      if (quote.customerId !== userId) {
+        throw new ForbiddenException('No puedes agregar esta cotizacion al carrito.');
+      }
+
+      const allowedStatuses: QuoteStatus[] = [QuoteStatus.ANSWERED, QuoteStatus.RESOLUTION_SENT, QuoteStatus.ADDED_TO_CART];
+      if (!allowedStatuses.includes(quote.status)) {
+        throw new BadRequestException('La cotizacion aun no esta lista para agregarse al carrito.');
+      }
+
+      if (!quote.quotedPrice) {
+        throw new BadRequestException('La cotizacion no tiene precio confirmado.');
+      }
+
+      if (quote.validUntil && quote.validUntil < new Date()) {
+        throw new BadRequestException('La cotizacion ya vencio.');
+      }
+
+      const item = await tx.cartItem.upsert({
+        where: { userId_quoteId: { userId, quoteId } },
+        create: {
+          userId,
+          quoteId,
+          titleSnapshot: quote.product?.title ?? quote.title,
+          quotedPriceSnapshot: quote.quotedPrice,
+          quantity,
+        },
+        update: { quantity: { increment: quantity } },
+        select: cartItemSummarySelect,
+      });
+
+      await tx.quoteRequest.update({
+        where: { id: quoteId },
+        data: { status: QuoteStatus.ADDED_TO_CART, convertedToCartAt: new Date() },
+      });
+
+      return item;
+    });
   }
 }

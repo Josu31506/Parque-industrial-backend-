@@ -94,6 +94,7 @@ export class UsersService {
     const where: Prisma.UserWhereInput = {
       role: roleFilter ?? { in: [Role.SELLER, Role.ADVISOR, Role.ADMIN] },
       NOT: { email: { endsWith: '@invitation.local' } },
+      ...(query.includeInactive ? {} : { isActive: true }),
     };
 
     const [items, total] = await this.prisma.$transaction([

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CartItem, Prisma } from '@prisma/client';
 
 type CartItemWithProduct = CartItem & {
+  productId: string;
   product: {
     id: string;
     producerId: string;

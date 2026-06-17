@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class CreateProducerDto {
   @ApiProperty()
@@ -21,4 +21,32 @@ export class CreateProducerDto {
   @ApiProperty()
   @IsString()
   description: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountType?: string;
+
+  @IsOptional()
+  @IsString()
+  cci?: string;
+
+  @IsOptional()
+  @IsString()
+  accountHolderName?: string;
 }

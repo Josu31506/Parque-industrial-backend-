@@ -31,10 +31,17 @@ export class PurchaseRequestsService {
       include: { product: true },
     });
 
-    const requestItems = cartItems.filter((item) =>
-      item.product.requiresConfirmation
-      || item.product.availabilityType === AvailabilityType.MADE_TO_ORDER,
-    );
+    const requestItems = cartItems.filter((item): item is typeof item & {
+      product: NonNullable<typeof item.product>;
+      productId: string;
+    } => Boolean(
+      item.product
+      && item.productId
+      && (
+        item.product.requiresConfirmation
+        || item.product.availabilityType === AvailabilityType.MADE_TO_ORDER
+      ),
+    ));
     if (!requestItems.length) {
       throw new BadRequestException('No hay productos que requieran confirmacion para solicitar compra.');
     }
@@ -307,10 +314,10 @@ export class PurchaseRequestsService {
       where: { purchaseRequestId: group.purchaseRequestId, producerId: group.producerId },
       include: { product: true, producer: true },
     });
-    const productName = items.map((item) => item.product.title).join(', ') || 'Producto solicitado';
+    const productName = items.map((item) => item.product?.title ?? 'Producto no disponible').join(', ') || 'Producto solicitado';
     const customer = group.purchaseRequest.customer;
     const mailItems = items.map((item) => ({
-      title: item.product.title,
+      title: item.product?.title ?? 'Producto no disponible',
       quantity: item.quantity,
       unitPrice: String(item.unitPrice),
       totalPrice: String(item.totalPrice),
@@ -376,6 +383,7 @@ export class PurchaseRequestsService {
             unitPrice: true,
             totalPrice: true,
             product: { select: { title: true } },
+            quote: { select: { title: true } },
             producer: { select: { businessName: true } },
           },
         },
@@ -390,7 +398,7 @@ export class PurchaseRequestsService {
       estimatedDeliveryDate: order.estimatedDeliveryDate,
       total: String(order.total),
       items: order.items.map((item) => ({
-        title: item.product.title,
+        title: item.product?.title ?? item.quote?.title ?? 'Producto cotizado',
         quantity: item.quantity,
         unitPrice: String(item.unitPrice),
         totalPrice: String(item.totalPrice),

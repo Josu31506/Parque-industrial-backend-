@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { AvailabilityType, FundsStatus, OrderItemStatus, OrderStatus, PaymentOption, PaymentStatus, Prisma, Role, SaleStatus } from '@prisma/client';
+import { AvailabilityType, ClaimStatus, FundsStatus, OrderItemStatus, OrderStatus, PaymentOption, PaymentStatus, Prisma, Role, SaleStatus } from '@prisma/client';
 import { CommissionService } from '../commission/commission.service';
 import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
 import { getPagination, paginatedResponse } from '../common/utils/pagination';
@@ -95,6 +95,9 @@ export class OrdersService {
         select: {
           id: true,
           productId: true,
+          quoteId: true,
+          titleSnapshot: true,
+          quotedPriceSnapshot: true,
           quantity: true,
           product: {
             select: {
@@ -109,15 +112,32 @@ export class OrdersService {
               estimatedDispatchDays: true,
             },
           },
+          quote: {
+            select: {
+              id: true,
+              producerId: true,
+              title: true,
+              quotedPrice: true,
+              quotedDeliveryDays: true,
+              product: { select: { producerId: true, title: true } },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
       });
       this.timeEnd('checkout-fetch-cart');
 
       const directItems = cartItems.filter((item) =>
-        item.product.isActive
-        && item.product.availabilityType === AvailabilityType.IN_STOCK
-        && item.product.requiresConfirmation === false,
+        (
+          item.product?.isActive
+          && item.product.availabilityType === AvailabilityType.IN_STOCK
+          && item.product.requiresConfirmation === false
+        )
+        || (
+          item.quoteId
+          && item.quote
+          && item.quotedPriceSnapshot
+        ),
       );
 
       if (!directItems.length) {
@@ -125,13 +145,13 @@ export class OrdersService {
       }
 
       for (const item of directItems) {
-        if (item.product.stock === null || item.product.stock < item.quantity) {
+        if (item.product && (item.product.stock === null || item.product.stock < item.quantity)) {
           throw new BadRequestException(`Stock insuficiente para ${item.product.title}.`);
         }
       }
 
       const total = Number(directItems.reduce((sum, item) => (
-        sum + Number(item.product.price) * item.quantity
+        sum + this.getCartCheckoutUnitPrice(item) * item.quantity
       ), 0).toFixed(2));
       const payment = this.paymentStrategy.calculate(total, paymentOption);
       const estimatedDeliveryDate = this.calculateEstimatedDeliveryDate(directItems);
@@ -156,10 +176,12 @@ export class OrdersService {
             items: {
               create: directItems.map((item) => ({
                 productId: item.productId,
-                producerId: item.product.producerId,
+                quoteId: item.quoteId,
+                titleSnapshot: item.titleSnapshot ?? item.quote?.product?.title ?? item.quote?.title,
+                producerId: this.getCartCheckoutProducerId(item),
                 quantity: item.quantity,
-                unitPrice: item.product.price,
-                totalPrice: new Prisma.Decimal(Number(item.product.price) * item.quantity),
+                unitPrice: new Prisma.Decimal(this.getCartCheckoutUnitPrice(item)),
+                totalPrice: new Prisma.Decimal(this.getCartCheckoutUnitPrice(item) * item.quantity),
               })),
             },
           },
@@ -167,11 +189,17 @@ export class OrdersService {
         this.timeEnd('checkout-create-order');
 
         this.timeStart('checkout-create-sales');
-        const producerIds = Array.from(new Set(directItems.map((item) => item.product.producerId)));
-        for (const producerId of producerIds) {
-          const producerItems = directItems.filter((item) => item.product.producerId === producerId);
+        const itemsByProducer = directItems.reduce((groups, item) => {
+          const producerId = this.getCartCheckoutProducerId(item);
+          const currentItems = groups.get(producerId) ?? [];
+          currentItems.push(item);
+          groups.set(producerId, currentItems);
+          return groups;
+        }, new Map<string, typeof directItems>());
+
+        for (const [producerId, producerItems] of itemsByProducer.entries()) {
           const gross = Number(producerItems.reduce((sum, item) => (
-            sum + Number(item.product.price) * item.quantity
+            sum + this.getCartCheckoutUnitPrice(item) * item.quantity
           ), 0).toFixed(2));
           const commissionAmount = Number((gross * (Number(commissionConfig.percentage) / 100)).toFixed(2));
           const netAmount = Number((gross - commissionAmount).toFixed(2));
@@ -189,9 +217,11 @@ export class OrdersService {
               items: {
                 create: producerItems.map((item) => ({
                   productId: item.productId,
+                  quoteId: item.quoteId,
+                  titleSnapshot: item.titleSnapshot ?? item.quote?.product?.title ?? item.quote?.title,
                   quantity: item.quantity,
-                  unitPrice: item.product.price,
-                  totalPrice: new Prisma.Decimal(Number(item.product.price) * item.quantity),
+                  unitPrice: new Prisma.Decimal(this.getCartCheckoutUnitPrice(item)),
+                  totalPrice: new Prisma.Decimal(this.getCartCheckoutUnitPrice(item) * item.quantity),
                 })),
               },
             },
@@ -200,8 +230,10 @@ export class OrdersService {
         this.timeEnd('checkout-create-sales');
 
         this.timeStart('checkout-stock-update');
-        await Promise.all(directItems.map((item) => tx.product.update({
-          where: { id: item.productId },
+        await Promise.all(directItems
+          .filter((item) => Boolean(item.productId && item.product))
+          .map((item) => tx.product.update({
+          where: { id: item.productId! },
           data: { stock: { decrement: item.quantity } },
         })));
         this.timeEnd('checkout-stock-update');
@@ -218,7 +250,7 @@ export class OrdersService {
 
       const createdOrder = await this.prisma.order.findUniqueOrThrow({
         where: { id: order.id },
-        include: this.orderInclude(),
+        select: this.orderResponseSelect(),
       });
       this.sendOrderStatusEmailInBackground(createdOrder.id, {
         statusLabel: 'Pedido confirmado',
@@ -240,14 +272,24 @@ export class OrdersService {
     }
 
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const claimDeadline = new Date(now);
+      claimDeadline.setDate(claimDeadline.getDate() + 3);
       await tx.order.update({
         where: { id },
-        data: { status: OrderStatus.DELIVERED },
+        data: {
+          status: OrderStatus.DELIVERED,
+          deliveredAt: now,
+          completedAt: now,
+          claimDeadlineAt: claimDeadline,
+          fundsReleasedAt: now,
+          fundsStatus: FundsStatus.RELEASED,
+        },
       });
 
       await tx.sale.updateMany({
         where: { orderId: id },
-        data: { status: SaleStatus.DELIVERED },
+        data: { status: SaleStatus.DELIVERED, fundsStatus: FundsStatus.RELEASED, releasedAt: now },
       });
 
       await tx.saleItem.updateMany({
@@ -282,12 +324,43 @@ export class OrdersService {
     return this.prisma.order.update({ where: { id }, data: { status: OrderStatus.CLOSED } });
   }
 
+  async releaseExpiredClaims() {
+    const now = new Date();
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: OrderStatus.DELIVERED,
+        fundsStatus: FundsStatus.HELD,
+        claimDeadlineAt: { lte: now },
+        claims: {
+          none: { status: { in: [ClaimStatus.OPEN, ClaimStatus.IN_REVIEW] } },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!orders.length) return { count: 0 };
+
+    const orderIds = orders.map((order) => order.id);
+    await this.prisma.$transaction([
+      this.prisma.order.updateMany({
+        where: { id: { in: orderIds } },
+        data: { fundsStatus: FundsStatus.RELEASED, fundsReleasedAt: now },
+      }),
+      this.prisma.sale.updateMany({
+        where: { orderId: { in: orderIds } },
+        data: { fundsStatus: FundsStatus.RELEASED, releasedAt: now },
+      }),
+    ]);
+
+    return { count: orderIds.length };
+  }
+
   private calculateEstimatedDeliveryDate(
-    items: Array<{ product: { estimatedDispatchDays: number | null } }>,
+    items: Array<{ product: { estimatedDispatchDays: number | null } | null; quote?: { quotedDeliveryDays: number | null } | null }>,
   ) {
     const maxDispatchDays = Math.max(
       0,
-      ...items.map((item) => item.product.estimatedDispatchDays ?? 0),
+      ...items.map((item) => item.product?.estimatedDispatchDays ?? item.quote?.quotedDeliveryDays ?? 0),
     );
     const estimated = new Date();
     estimated.setDate(estimated.getDate() + maxDispatchDays + 2);
@@ -299,6 +372,7 @@ export class OrdersService {
       items: {
         include: {
           product: { select: { id: true, title: true, imageUrl: true, producerId: true } },
+          quote: { select: { id: true, title: true, quotedPrice: true } },
           producer: { select: { id: true, businessName: true } },
         },
       },
@@ -307,12 +381,84 @@ export class OrdersService {
           items: {
             include: {
               product: { select: { id: true, title: true } },
+              quote: { select: { id: true, title: true, quotedPrice: true } },
             },
           },
           producer: { select: { id: true, businessName: true } },
         },
       },
     } satisfies Prisma.OrderInclude;
+  }
+
+  private orderResponseSelect() {
+    return {
+      id: true,
+      orderNumber: true,
+      customerId: true,
+      status: true,
+      total: true,
+      paymentOption: true,
+      paidAmount: true,
+      remainingAmount: true,
+      paymentStatus: true,
+      fundsStatus: true,
+      estimatedDeliveryDate: true,
+      deliveredAt: true,
+      claimDeadlineAt: true,
+      completedAt: true,
+      fundsReleasedAt: true,
+      createdAt: true,
+      items: {
+        select: {
+          id: true,
+          orderId: true,
+          productId: true,
+          quoteId: true,
+          titleSnapshot: true,
+          producerId: true,
+          quantity: true,
+          unitPrice: true,
+          totalPrice: true,
+          status: true,
+          product: { select: { id: true, title: true, imageUrl: true, producerId: true } },
+          quote: { select: { id: true, title: true, quotedPrice: true } },
+          producer: { select: { id: true, businessName: true } },
+        },
+      },
+      sales: {
+        select: {
+          id: true,
+          orderId: true,
+          producerId: true,
+          status: true,
+          grossAmount: true,
+          commissionAmount: true,
+          netAmount: true,
+          paymentStatus: true,
+          fundsStatus: true,
+          readyDate: true,
+          releasedAt: true,
+          paidAt: true,
+          createdAt: true,
+          producer: { select: { id: true, businessName: true } },
+          items: {
+            select: {
+              id: true,
+              saleId: true,
+              productId: true,
+              quoteId: true,
+              titleSnapshot: true,
+              quantity: true,
+              unitPrice: true,
+              totalPrice: true,
+              status: true,
+              product: { select: { id: true, title: true } },
+              quote: { select: { id: true, title: true, quotedPrice: true } },
+            },
+          },
+        },
+      },
+    } satisfies Prisma.OrderSelect;
   }
 
   private async getOrderEmailSummary(orderId: string) {
@@ -330,6 +476,7 @@ export class OrdersService {
             unitPrice: true,
             totalPrice: true,
             product: { select: { title: true } },
+            quote: { select: { title: true } },
             producer: { select: { businessName: true } },
           },
         },
@@ -344,13 +491,30 @@ export class OrdersService {
       estimatedDeliveryDate: order.estimatedDeliveryDate,
       total: String(order.total),
       items: order.items.map((item) => ({
-        title: item.product.title,
+        title: item.product?.title ?? item.quote?.title ?? 'Producto cotizado',
         quantity: item.quantity,
         unitPrice: String(item.unitPrice),
         totalPrice: String(item.totalPrice),
         producerName: item.producer.businessName,
       })),
     };
+  }
+
+  private getCartCheckoutUnitPrice(item: {
+    product?: { price: Prisma.Decimal | number | string } | null;
+    quotedPriceSnapshot?: Prisma.Decimal | null;
+    quote?: { quotedPrice?: Prisma.Decimal | null } | null;
+  }) {
+    return Number(item.quotedPriceSnapshot ?? item.quote?.quotedPrice ?? item.product?.price ?? 0);
+  }
+
+  private getCartCheckoutProducerId(item: {
+    product?: { producerId: string } | null;
+    quote?: { producerId: string | null; product?: { producerId: string } | null } | null;
+  }) {
+    const producerId = item.product?.producerId ?? item.quote?.producerId ?? item.quote?.product?.producerId;
+    if (!producerId) throw new BadRequestException('La cotizacion no tiene productora asociada.');
+    return producerId;
   }
 
   private sendOrderStatusEmailInBackground(

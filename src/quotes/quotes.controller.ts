@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { QuoteResolutionDto } from './dto/quote-resolution.dto';
+import { RespondQuoteDto } from './dto/respond-quote.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { QuotesService } from './quotes.service';
 
@@ -64,6 +65,12 @@ export class QuotesController {
   @Post(':id/resolution')
   resolution(@Param('id') id: string, @Body() dto: QuoteResolutionDto, @CurrentUser() user: { sub: string; role: string }) {
     return this.quotesService.addResolution(id, dto, user);
+  }
+
+  @Roles(Role.SELLER)
+  @Patch(':id/respond')
+  respond(@Param('id') id: string, @Body() dto: RespondQuoteDto, @CurrentUser() user: { sub: string }) {
+    return this.quotesService.respond(id, dto, user.sub);
   }
 
   @Roles(Role.CLIENT)

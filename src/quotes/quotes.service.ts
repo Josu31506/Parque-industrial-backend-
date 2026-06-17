@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma, QuoteStatus, Role } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { SmallPaginationQueryDto } from '../common/dto/small-pagination-query.dto';
@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { QuoteResolutionDto } from './dto/quote-resolution.dto';
+import { RespondQuoteDto } from './dto/respond-quote.dto';
 
 @Injectable()
 export class QuotesService {
@@ -17,10 +18,18 @@ export class QuotesService {
   ) {}
 
   async create(customerId: string, dto: CreateQuoteDto) {
+    const product = dto.productId
+      ? await this.prisma.product.findUnique({
+        where: { id: dto.productId },
+        select: { producerId: true },
+      })
+      : null;
+
     const quote = await this.prisma.quoteRequest.create({
       data: {
         ...dto,
         customerId,
+        producerId: product?.producerId,
         referenceImages: dto.referenceImages ?? Prisma.JsonNull,
       },
     });
@@ -92,7 +101,10 @@ export class QuotesService {
       const { page, limit, skip } = getPagination(query.page, query.limit);
       const where: Prisma.QuoteRequestWhereInput = {
         type: 'PRODUCT_BASED',
-        product: { producerId: producer.id },
+        OR: [
+          { producerId: producer.id },
+          { product: { producerId: producer.id } },
+        ],
       };
 
       const [items, total] = await this.prisma.$transaction([
@@ -104,6 +116,10 @@ export class QuotesService {
             type: true,
             productId: true,
             status: true,
+            quotedPrice: true,
+            quotedDeliveryDays: true,
+            sellerComment: true,
+            validUntil: true,
             title: true,
             description: true,
             quantity: true,
@@ -191,7 +207,14 @@ export class QuotesService {
     });
     const quote = await this.prisma.quoteRequest.update({
       where: { id },
-      data: { status: QuoteStatus.RESOLUTION_SENT },
+      data: {
+        status: QuoteStatus.RESOLUTION_SENT,
+        producerId: dto.producerId,
+        quotedPrice: new Prisma.Decimal(dto.finalPrice),
+        quotedDeliveryDays: this.parseDeliveryDays(dto.deliveryTime),
+        sellerComment: dto.notes,
+        validUntil: dto.validUntil,
+      },
       include: { customer: { select: { id: true, name: true, email: true } } },
     });
     void this.mail.sendQuoteResolvedEmail({
@@ -208,17 +231,127 @@ export class QuotesService {
     return resolution;
   }
 
+  async respond(id: string, dto: RespondQuoteDto, sellerId: string) {
+    const producer = await this.prisma.producer.findUniqueOrThrow({
+      where: { userId: sellerId },
+      select: { id: true, businessName: true },
+    });
+    const quote = await this.prisma.quoteRequest.findUniqueOrThrow({
+      where: { id },
+      include: {
+        customer: { select: { id: true, name: true, email: true } },
+        product: { select: { id: true, title: true, producerId: true } },
+      },
+    });
+
+    if (quote.type !== 'PRODUCT_BASED') {
+      throw new ForbiddenException('Solo puedes responder cotizaciones basadas en tus productos.');
+    }
+
+    if ((quote.producerId ?? quote.product?.producerId) !== producer.id) {
+      throw new ForbiddenException('Esta cotizacion pertenece a otra productora.');
+    }
+
+    const respondableStatuses: QuoteStatus[] = [
+      QuoteStatus.PENDING_REVIEW,
+      QuoteStatus.IN_COORDINATION,
+      QuoteStatus.CONSULTING_PRODUCER,
+    ];
+    if (!respondableStatuses.includes(quote.status)) {
+      throw new BadRequestException('Esta cotizacion ya fue respondida o no puede modificarse.');
+    }
+
+    const updated = await this.prisma.quoteRequest.update({
+      where: { id },
+      data: {
+        status: QuoteStatus.ANSWERED,
+        producerId: producer.id,
+        quotedPrice: new Prisma.Decimal(dto.quotedPrice),
+        quotedDeliveryDays: dto.quotedDeliveryDays,
+        sellerComment: dto.sellerComment,
+        validUntil: dto.validUntil,
+      },
+      include: {
+        customer: { select: this.safeCustomerSelect() },
+        product: { include: { producer: true } },
+        resolutions: true,
+      },
+    });
+
+    void this.mail.sendQuoteResolvedEmail({
+      to: quote.customer.email,
+      customerName: quote.customer.name,
+      quoteId: quote.id,
+      quoteTitle: quote.title,
+      finalTitle: quote.product?.title ?? quote.title,
+      finalPrice: dto.quotedPrice,
+      deliveryTime: `${dto.quotedDeliveryDays} dias`,
+      notes: dto.sellerComment,
+      quoteUrl: this.frontendUrl('/quotes'),
+    }).catch((error) => console.error('No se pudo enviar correo de cotizacion respondida.', error));
+
+    return updated;
+  }
+
   async addToCart(id: string, customerId: string) {
     const quote = await this.prisma.quoteRequest.findUniqueOrThrow({
       where: { id },
-      select: { customerId: true },
+      select: {
+        id: true,
+        customerId: true,
+        title: true,
+        status: true,
+        quotedPrice: true,
+        validUntil: true,
+        product: { select: { title: true } },
+      },
     });
 
     if (quote.customerId !== customerId) {
       throw new ForbiddenException('No puedes agregar esta cotizacion al carrito.');
     }
 
-    return this.prisma.quoteRequest.update({ where: { id }, data: { status: QuoteStatus.ADDED_TO_CART } });
+    const allowedStatuses: QuoteStatus[] = [QuoteStatus.ANSWERED, QuoteStatus.RESOLUTION_SENT, QuoteStatus.ADDED_TO_CART];
+    if (!allowedStatuses.includes(quote.status)) {
+      throw new BadRequestException('La cotizacion aun no esta lista para agregar al carrito.');
+    }
+
+    if (!quote.quotedPrice) {
+      throw new BadRequestException('La cotizacion no tiene precio confirmado.');
+    }
+
+    if (quote.validUntil && quote.validUntil < new Date()) {
+      throw new BadRequestException('La cotizacion ya vencio.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.cartItem.upsert({
+        where: { userId_quoteId: { userId: customerId, quoteId: id } },
+        create: {
+          userId: customerId,
+          quoteId: id,
+          titleSnapshot: quote.product?.title ?? quote.title,
+          quotedPriceSnapshot: quote.quotedPrice,
+          quantity: 1,
+        },
+        update: { quantity: { increment: 1 } },
+        include: {
+          quote: {
+            include: {
+              product: { include: { producer: true } },
+              producer: true,
+            },
+          },
+        },
+      });
+
+      await tx.quoteRequest.update({
+        where: { id },
+        data: { status: QuoteStatus.ADDED_TO_CART, convertedToCartAt: new Date() },
+      });
+
+      return item;
+    });
   }
 
   private frontendUrl(path: string) {
@@ -256,6 +389,11 @@ export class QuotesService {
       email: true,
       phone: true,
     } satisfies Prisma.UserSelect;
+  }
+
+  private parseDeliveryDays(value: string) {
+    const match = value.match(/\d+/);
+    return match ? Number(match[0]) : null;
   }
 
   private startDevTimer(label: string) {

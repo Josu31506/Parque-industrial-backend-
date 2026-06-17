@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SalesService } from './sales.service';
+import { EarningsQueryDto } from './dto/earnings-query.dto';
 
 @ApiTags('sales')
 @ApiBearerAuth()
@@ -19,6 +20,12 @@ export class SalesController {
   @Get('my')
   my(@CurrentUser() user: { sub: string; role: string }, @Query() query: SmallPaginationQueryDto) {
     return this.salesService.findMySales(user.sub, user.role, query);
+  }
+
+  @Roles(Role.SELLER)
+  @Get('earnings')
+  earnings(@CurrentUser() user: { sub: string }, @Query() query: EarningsQueryDto) {
+    return this.salesService.findMyEarnings(user.sub, query.month, query);
   }
 
   @Get(':id')
