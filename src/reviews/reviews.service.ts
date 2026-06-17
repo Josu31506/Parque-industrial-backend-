@@ -5,7 +5,7 @@ import { getPagination, paginatedResponse } from '../common/utils/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 
-const REVIEWABLE_ORDER_STATUSES: OrderStatus[] = [OrderStatus.DELIVERED, OrderStatus.CLOSED];
+const REVIEWABLE_ORDER_STATUSES: OrderStatus[] = [OrderStatus.DELIVERED, OrderStatus.VERIFIED, OrderStatus.CLOSED];
 
 @Injectable()
 export class ReviewsService {

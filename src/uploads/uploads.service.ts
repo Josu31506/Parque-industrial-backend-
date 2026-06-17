@@ -40,6 +40,26 @@ export class UploadsService {
     return { url: data.publicUrl };
   }
 
+  async uploadClaimImage(file: Express.Multer.File | undefined, userId: string) {
+    this.validateProductImage(file);
+    const supabase = this.getSupabaseClient();
+
+    const path = this.buildClaimImagePath(file as Express.Multer.File, userId);
+    const { error } = await supabase.storage
+      .from(this.bucket)
+      .upload(path, (file as Express.Multer.File).buffer, {
+        contentType: (file as Express.Multer.File).mimetype,
+        upsert: false,
+      });
+
+    if (error) {
+      throw new BadRequestException(error.message || 'No se pudo subir la imagen.');
+    }
+
+    const { data } = supabase.storage.from(this.bucket).getPublicUrl(path);
+    return { url: data.publicUrl };
+  }
+
   private getSupabaseClient() {
     if (this.supabase) return this.supabase;
 
@@ -79,6 +99,12 @@ export class UploadsService {
     const normalizedName = this.normalizeFileName(file.originalname);
     const extension = PRODUCT_IMAGE_EXTENSIONS[file.mimetype] ?? 'jpg';
     return `products/${userId}/${randomUUID()}-${normalizedName}.${extension}`;
+  }
+
+  private buildClaimImagePath(file: Express.Multer.File, userId: string) {
+    const normalizedName = this.normalizeFileName(file.originalname);
+    const extension = PRODUCT_IMAGE_EXTENSIONS[file.mimetype] ?? 'jpg';
+    return `claims/${userId}/${randomUUID()}-${normalizedName}.${extension}`;
   }
 
   private normalizeFileName(fileName: string) {

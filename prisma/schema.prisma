@@ -69,6 +69,7 @@ enum OrderStatus {
   READY_FOR_DISPATCH
   DISPATCHED
   DELIVERED
+  VERIFIED
   IN_REVIEW
   CLOSED
   IN_CLAIM
@@ -98,6 +99,12 @@ enum ClaimReason {
   WRONG_DIMENSIONS
   WRONG_COLOR
   NOT_DELIVERED
+  PRODUCTO_DANADO
+  PRODUCTO_INCORRECTO
+  FALTAN_PRODUCTOS
+  MALA_CALIDAD
+  ENTREGA_INCOMPLETA
+  OTRO
   OTHER
 }
 
@@ -317,7 +324,10 @@ model Order {
   paymentStatus         PaymentStatus  @default(PENDING)
   fundsStatus           FundsStatus    @default(HELD)
   estimatedDeliveryDate DateTime?
+  dispatchedAt          DateTime?
   deliveredAt           DateTime?
+  verifiedAt            DateTime?
+  autoVerifiedAt        DateTime?
   claimDeadlineAt       DateTime?
   completedAt           DateTime?
   fundsReleasedAt       DateTime?
@@ -393,6 +403,7 @@ model Claim {
   customerId  String
   reason      ClaimReason
   description String
+  evidenceImages Json?
   status      ClaimStatus @default(OPEN)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt

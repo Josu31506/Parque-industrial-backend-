@@ -19,7 +19,7 @@ export class CommissionService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const activeConfig = config ?? { percentage: 10 };
+    const activeConfig = config ?? { percentage: 5 };
     this.cachedConfig = { percentage: activeConfig.percentage, updatedAt: Date.now() };
     return activeConfig;
   }

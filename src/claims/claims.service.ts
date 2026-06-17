@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { ClaimStatus, FundsStatus, OrderStatus, SaleStatus } from '@prisma/client';
+import { ClaimStatus, FundsStatus, OrderStatus, Prisma, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 
@@ -8,14 +8,25 @@ export class ClaimsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(customerId: string, dto: CreateClaimDto) {
-    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: dto.orderId } });
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: dto.orderId },
+      include: { claims: { select: { status: true } } },
+    });
     if (order.customerId !== customerId) throw new ForbiddenException('No puedes reclamar este pedido.');
     if (!this.canCreateClaim(order)) {
-      throw new BadRequestException('El plazo para reportar un problema sobre este pedido ha vencido.');
+      throw new BadRequestException('El plazo para reportar un problema ha vencido o el pedido ya fue verificado.');
     }
 
     const claim = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.claim.create({ data: { ...dto, customerId } });
+      const created = await tx.claim.create({
+        data: {
+          orderId: dto.orderId,
+          customerId,
+          reason: dto.reason,
+          description: dto.description,
+          evidenceImages: dto.evidenceImages ?? Prisma.JsonNull,
+        },
+      });
       await tx.order.update({
         where: { id: dto.orderId },
         data: { fundsStatus: FundsStatus.HELD_BY_CLAIM, status: OrderStatus.IN_CLAIM },
@@ -72,13 +83,23 @@ export class ClaimsService {
     deliveredAt: Date | null;
     claimDeadlineAt: Date | null;
     fundsStatus: FundsStatus;
+    claims?: Array<{ status: ClaimStatus }>;
   }) {
-    if (order.status === OrderStatus.CLOSED || order.fundsStatus === FundsStatus.RELEASED) {
+    if (
+      order.status === OrderStatus.VERIFIED
+      || order.status === OrderStatus.CLOSED
+      || order.status !== OrderStatus.DELIVERED
+      || order.fundsStatus === FundsStatus.RELEASED
+    ) {
       return false;
     }
 
-    if (!order.deliveredAt && order.status !== OrderStatus.DELIVERED) return true;
-    if (!order.claimDeadlineAt) return true;
+    const hasOpenClaim = order.claims?.some((claim) => (
+      claim.status === ClaimStatus.OPEN || claim.status === ClaimStatus.IN_REVIEW
+    ));
+
+    if (hasOpenClaim) return false;
+    if (!order.claimDeadlineAt) return false;
 
     return new Date() <= order.claimDeadlineAt;
   }

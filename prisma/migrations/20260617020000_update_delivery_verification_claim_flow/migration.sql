@@ -1,0 +1,24 @@
+ALTER TYPE "OrderStatus" ADD VALUE IF NOT EXISTS 'VERIFIED';
+
+ALTER TYPE "ClaimReason" ADD VALUE IF NOT EXISTS 'PRODUCTO_DANADO';
+ALTER TYPE "ClaimReason" ADD VALUE IF NOT EXISTS 'PRODUCTO_INCORRECTO';
+ALTER TYPE "ClaimReason" ADD VALUE IF NOT EXISTS 'FALTAN_PRODUCTOS';
+ALTER TYPE "ClaimReason" ADD VALUE IF NOT EXISTS 'MALA_CALIDAD';
+ALTER TYPE "ClaimReason" ADD VALUE IF NOT EXISTS 'ENTREGA_INCOMPLETA';
+
+ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "dispatchedAt" TIMESTAMP(3);
+ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "verifiedAt" TIMESTAMP(3);
+ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "autoVerifiedAt" TIMESTAMP(3);
+
+ALTER TABLE "Claim" ADD COLUMN IF NOT EXISTS "evidenceImages" JSONB;
+
+UPDATE "CommissionConfig"
+SET "isActive" = false
+WHERE "isActive" = true;
+
+INSERT INTO "CommissionConfig" ("id", "percentage", "isActive", "createdAt", "updatedAt")
+VALUES ('default-commission-5', 5, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT ("id") DO UPDATE
+SET "percentage" = 5,
+    "isActive" = true,
+    "updatedAt" = CURRENT_TIMESTAMP;

@@ -51,4 +51,38 @@ export class UploadsController {
   ) {
     return this.uploadsService.uploadProductImage(file, user.sub);
   }
+
+  @Post('claim-image')
+  @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: MAX_PRODUCT_IMAGE_SIZE },
+    fileFilter: (_request, file, callback) => {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+        callback(new BadRequestException('Solo se permiten imagenes JPG, PNG o WEBP.'), false);
+        return;
+      }
+
+      callback(null, true);
+    },
+  }))
+  uploadClaimImage(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: { sub: string },
+  ) {
+    return this.uploadsService.uploadClaimImage(file, user.sub);
+  }
 }

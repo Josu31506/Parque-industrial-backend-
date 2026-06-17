@@ -34,6 +34,18 @@ export class OrdersController {
     return this.ordersService.releaseExpiredClaims();
   }
 
+  @Roles(Role.ADMIN)
+  @Post('auto-mark-delivered')
+  autoMarkDelivered() {
+    return this.ordersService.autoMarkDelivered();
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('auto-verify-delivered')
+  autoVerifyDelivered() {
+    return this.ordersService.autoVerifyDelivered();
+  }
+
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
   @Get(':id')
   one(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {
@@ -50,6 +62,12 @@ export class OrdersController {
   @Patch(':id/mark-delivered')
   delivered(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {
     return this.ordersService.markDelivered(id, user);
+  }
+
+  @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
+  @Patch(':id/verify')
+  verify(@Param('id') id: string, @CurrentUser() user: { sub: string; role: string }) {
+    return this.ordersService.verify(id, user);
   }
 
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)

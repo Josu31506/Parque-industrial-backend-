@@ -410,10 +410,14 @@ async function main() {
     });
   }
 
+  await prisma.commissionConfig.updateMany({
+    data: { isActive: false },
+  });
+
   await prisma.commissionConfig.upsert({
-    where: { id: 'default-commission' },
-    update: { percentage: 10, isActive: true },
-    create: { id: 'default-commission', percentage: 10, isActive: true },
+    where: { id: 'default-commission-5' },
+    update: { percentage: 5, isActive: true },
+    create: { id: 'default-commission-5', percentage: 5, isActive: true },
   });
 
   console.log(`Seed listo. Admin: ${admin.email}. Productos creados o actualizados: ${products.length}.`);

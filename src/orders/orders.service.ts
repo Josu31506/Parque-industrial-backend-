@@ -67,6 +67,13 @@ export class OrdersService {
         status: order.status,
         createdAt: order.createdAt,
         estimatedDeliveryDate: order.estimatedDeliveryDate,
+        dispatchedAt: order.dispatchedAt,
+        deliveredAt: order.deliveredAt,
+        verifiedAt: order.verifiedAt,
+        autoVerifiedAt: order.autoVerifiedAt,
+        claimDeadlineAt: order.claimDeadlineAt,
+        completedAt: order.completedAt,
+        fundsReleasedAt: order.fundsReleasedAt,
         total: order.total,
         paidAmount: order.paidAmount,
         remainingAmount: order.remainingAmount,
@@ -267,8 +274,12 @@ export class OrdersService {
   async markDelivered(id: string, actor: { sub: string; role: string }) {
     const order = await this.findOne(id, actor);
 
-    if (actor.role === Role.CLIENT && order.status !== OrderStatus.DISPATCHED) {
+    if (order.status !== OrderStatus.DISPATCHED) {
       throw new BadRequestException('Solo puedes confirmar recepcion cuando el pedido esta en camino.');
+    }
+
+    if (order.fundsStatus === FundsStatus.HELD_BY_CLAIM) {
+      throw new BadRequestException('No puedes marcar entrega mientras el pedido tiene un reclamo.');
     }
 
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
@@ -280,16 +291,14 @@ export class OrdersService {
         data: {
           status: OrderStatus.DELIVERED,
           deliveredAt: now,
-          completedAt: now,
           claimDeadlineAt: claimDeadline,
-          fundsReleasedAt: now,
-          fundsStatus: FundsStatus.RELEASED,
+          fundsStatus: FundsStatus.HELD,
         },
       });
 
       await tx.sale.updateMany({
         where: { orderId: id },
-        data: { status: SaleStatus.DELIVERED, fundsStatus: FundsStatus.RELEASED, releasedAt: now },
+        data: { status: SaleStatus.DELIVERED, fundsStatus: FundsStatus.HELD },
       });
 
       await tx.saleItem.updateMany({
@@ -308,13 +317,11 @@ export class OrdersService {
       });
     });
 
-    if (order.status !== OrderStatus.DELIVERED) {
-      this.sendOrderStatusEmailInBackground(id, {
-        statusLabel: 'Entregado',
-        title: 'Pedido entregado',
-        intro: 'Gracias por confirmar la recepción de tu pedido.',
-      });
-    }
+    this.sendOrderStatusEmailInBackground(id, {
+      statusLabel: 'Entregado',
+      title: 'Pedido entregado',
+      intro: 'Tu pedido fue marcado como entregado. Tienes 3 dias para reportar cualquier problema.',
+    });
 
     return updatedOrder;
   }
@@ -324,7 +331,72 @@ export class OrdersService {
     return this.prisma.order.update({ where: { id }, data: { status: OrderStatus.CLOSED } });
   }
 
-  async releaseExpiredClaims() {
+  async verify(id: string, actor: { sub: string; role: string }) {
+    const order = await this.findOne(id, actor);
+
+    if (order.status !== OrderStatus.DELIVERED) {
+      throw new BadRequestException('Solo puedes verificar un pedido entregado.');
+    }
+
+    const hasOpenClaim = order.claims.some((claim) => (
+      claim.status === ClaimStatus.OPEN || claim.status === ClaimStatus.IN_REVIEW
+    ));
+
+    if (hasOpenClaim || order.fundsStatus === FundsStatus.HELD_BY_CLAIM) {
+      throw new BadRequestException('No puedes verificar un pedido con reclamo abierto.');
+    }
+
+    const updatedOrder = await this.releaseFundsAndVerify(id);
+    this.sendOrderStatusEmailInBackground(id, {
+      statusLabel: 'Verificado',
+      title: 'Pedido verificado',
+      intro: 'Tu pedido fue verificado correctamente. El pago sera liberado al productor.',
+    });
+    return updatedOrder;
+  }
+
+  async autoMarkDelivered() {
+    const now = new Date();
+    const threshold = new Date(now);
+    threshold.setDate(threshold.getDate() - 1);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: OrderStatus.DISPATCHED,
+        dispatchedAt: { lte: threshold },
+        fundsStatus: { not: FundsStatus.HELD_BY_CLAIM },
+      },
+      select: { id: true },
+    });
+
+    if (!orders.length) return { count: 0 };
+
+    const claimDeadline = new Date(now);
+    claimDeadline.setDate(claimDeadline.getDate() + 3);
+    const orderIds = orders.map((order) => order.id);
+
+    await this.prisma.$transaction([
+      this.prisma.order.updateMany({
+        where: { id: { in: orderIds } },
+        data: { status: OrderStatus.DELIVERED, deliveredAt: now, claimDeadlineAt: claimDeadline },
+      }),
+      this.prisma.sale.updateMany({
+        where: { orderId: { in: orderIds } },
+        data: { status: SaleStatus.DELIVERED },
+      }),
+      this.prisma.saleItem.updateMany({
+        where: { sale: { orderId: { in: orderIds } } },
+        data: { status: OrderItemStatus.DELIVERED },
+      }),
+      this.prisma.orderItem.updateMany({
+        where: { orderId: { in: orderIds } },
+        data: { status: OrderItemStatus.DELIVERED },
+      }),
+    ]);
+
+    return { count: orderIds.length };
+  }
+
+  async autoVerifyDelivered() {
     const now = new Date();
     const orders = await this.prisma.order.findMany({
       where: {
@@ -338,21 +410,42 @@ export class OrdersService {
       select: { id: true },
     });
 
-    if (!orders.length) return { count: 0 };
+    for (const order of orders) {
+      await this.releaseFundsAndVerify(order.id, true);
+    }
 
-    const orderIds = orders.map((order) => order.id);
-    await this.prisma.$transaction([
-      this.prisma.order.updateMany({
-        where: { id: { in: orderIds } },
-        data: { fundsStatus: FundsStatus.RELEASED, fundsReleasedAt: now },
-      }),
-      this.prisma.sale.updateMany({
-        where: { orderId: { in: orderIds } },
+    return { count: orders.length };
+  }
+
+  async releaseExpiredClaims() {
+    return this.autoVerifyDelivered();
+  }
+
+  private async releaseFundsAndVerify(id: string, autoVerified = false) {
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id },
+        data: {
+          status: OrderStatus.VERIFIED,
+          verifiedAt: now,
+          autoVerifiedAt: autoVerified ? now : undefined,
+          completedAt: now,
+          fundsReleasedAt: now,
+          fundsStatus: FundsStatus.RELEASED,
+        },
+      });
+
+      await tx.sale.updateMany({
+        where: { orderId: id },
         data: { fundsStatus: FundsStatus.RELEASED, releasedAt: now },
-      }),
-    ]);
+      });
 
-    return { count: orderIds.length };
+      return tx.order.findUniqueOrThrow({
+        where: { id },
+        include: this.orderInclude(),
+      });
+    });
   }
 
   private calculateEstimatedDeliveryDate(
@@ -387,6 +480,7 @@ export class OrdersService {
           producer: { select: { id: true, businessName: true } },
         },
       },
+      claims: { select: { id: true, status: true } },
     } satisfies Prisma.OrderInclude;
   }
 
@@ -403,7 +497,10 @@ export class OrdersService {
       paymentStatus: true,
       fundsStatus: true,
       estimatedDeliveryDate: true,
+      dispatchedAt: true,
       deliveredAt: true,
+      verifiedAt: true,
+      autoVerifiedAt: true,
       claimDeadlineAt: true,
       completedAt: true,
       fundsReleasedAt: true,

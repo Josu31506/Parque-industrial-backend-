@@ -203,11 +203,12 @@ export class SalesService {
     nextSaleStatus: SaleStatus,
   ) {
     const preparationStartStatuses: OrderStatus[] = [OrderStatus.PAYMENT_COMPLETED, OrderStatus.ORDER_CONFIRMED];
-    const dispatchedTerminalStatuses: OrderStatus[] = [OrderStatus.DISPATCHED, OrderStatus.DELIVERED, OrderStatus.CLOSED];
+    const dispatchedTerminalStatuses: OrderStatus[] = [OrderStatus.DISPATCHED, OrderStatus.DELIVERED, OrderStatus.VERIFIED, OrderStatus.CLOSED];
     const readyOrTerminalStatuses: OrderStatus[] = [
       OrderStatus.READY_FOR_DISPATCH,
       OrderStatus.DISPATCHED,
       OrderStatus.DELIVERED,
+      OrderStatus.VERIFIED,
       OrderStatus.CLOSED,
     ];
 
@@ -247,7 +248,7 @@ export class SalesService {
       if (!dispatchedTerminalStatuses.includes(sale.order.status)) {
         await this.prisma.order.update({
           where: { id: sale.orderId },
-          data: { status: OrderStatus.DISPATCHED },
+          data: { status: OrderStatus.DISPATCHED, dispatchedAt: new Date() },
         });
         this.sendOrderStatusEmailInBackground(sale.orderId, {
           statusLabel: 'En camino',
@@ -374,7 +375,7 @@ export class SalesService {
   private saleListInclude() {
     return {
       producer: { select: { id: true, businessName: true, userId: true } },
-      order: { select: { id: true, orderNumber: true, status: true, deliveredAt: true, claimDeadlineAt: true } },
+      order: { select: { id: true, orderNumber: true, status: true, dispatchedAt: true, deliveredAt: true, verifiedAt: true, claimDeadlineAt: true } },
       items: {
         include: {
           product: { select: { id: true, title: true } },
@@ -400,7 +401,9 @@ export class SalesService {
         select: {
           id: true,
           orderNumber: true,
+          dispatchedAt: true,
           deliveredAt: true,
+          verifiedAt: true,
           claimDeadlineAt: true,
         },
       },
