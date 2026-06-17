@@ -17,6 +17,7 @@ import { ProducersModule } from './producers/producers.module';
 import { ProductsModule } from './products/products.module';
 import { PurchaseRequestsModule } from './purchase-requests/purchase-requests.module';
 import { QuotesModule } from './quotes/quotes.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { RolesModule } from './roles/roles.module';
 import { SalesModule } from './sales/sales.module';
 import { UploadsModule } from './uploads/uploads.module';
@@ -45,6 +46,7 @@ import { UsersModule } from './users/users.module';
     ClaimsModule,
     NotificationsModule,
     QuotesModule,
+    ReviewsModule,
     PaymentsModule,
     CommissionModule,
     InvitationsModule,

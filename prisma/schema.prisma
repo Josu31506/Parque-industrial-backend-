@@ -155,6 +155,7 @@ model User {
   notifications     Notification[]
   quoteRequests     QuoteRequest[]
   sentInvitations   Invitation[]      @relation("InvitedBy")
+  reviews           Review[]
 }
 
 model Producer {
@@ -232,6 +233,7 @@ model Product {
   orderItems            OrderItem[]
   saleItems             SaleItem[]
   quoteRequests         QuoteRequest[]
+  reviews               Review[]
 }
 
 model CartItem {
@@ -327,6 +329,7 @@ model Order {
   items           OrderItem[]
   sales           Sale[]
   claims          Claim[]
+  reviews         Review[]
 }
 
 model OrderItem {
@@ -488,4 +491,24 @@ model Invitation {
 
   @@index([email])
   @@index([status])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  productId  String
+  customerId String
+  orderId    String
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product  Product @relation(fields: [productId], references: [id])
+  customer User    @relation(fields: [customerId], references: [id])
+  order    Order   @relation(fields: [orderId], references: [id])
+
+  @@unique([productId, customerId, orderId])
+  @@index([productId])
+  @@index([customerId])
+  @@index([orderId])
 }
