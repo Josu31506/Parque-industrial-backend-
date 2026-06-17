@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 type MailMessage = {
   to: string;
@@ -106,11 +107,13 @@ export class MailService {
     producerName?: string;
     expiresAt?: string | Date | null;
   }): Promise<void> {
-    const roleLabel = params.role === 'SELLER'
-      ? 'Trabajador/Productor'
-      : params.role === 'ADVISOR'
-        ? 'Asesor'
-        : 'Administrador';
+    const roleLabel =
+      params.role === 'SELLER'
+        ? 'Trabajador/Productor'
+        : params.role === 'ADVISOR'
+          ? 'Asesor'
+          : 'Administrador';
+
     await this.sendMail({
       to: params.to,
       subject: 'Invitacion a Parque Industrial Conecta',
@@ -120,7 +123,9 @@ export class MailService {
         params.producerName ? `Productora asociada: ${params.producerName}` : '',
         params.expiresAt ? `Vence: ${this.formatDate(params.expiresAt)}` : '',
         `Completa tu registro en el siguiente enlace: ${params.invitationUrl}`,
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       html: this.renderTemplate({
         title: 'Invitacion a Parque Industrial Conecta',
         preheader: 'Completa tu registro para acceder a la plataforma.',
@@ -157,7 +162,9 @@ export class MailService {
         `Comentario: ${comment}`,
         this.formatItemsText(params.items ?? []),
         `Continuar: ${paymentUrl}`,
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       html: this.renderTemplate({
         title: 'Solicitud autorizada',
         preheader: `Tu solicitud ${requestCode} fue autorizada.`,
@@ -192,7 +199,9 @@ export class MailService {
         `Motivo: ${reason}`,
         this.formatItemsText(params.items ?? []),
         'Puedes revisar otros productos o solicitar una cotización.',
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       html: this.renderTemplate({
         title: 'Tu solicitud no pudo ser confirmada',
         preheader: `La solicitud ${requestCode} necesita una alternativa.`,
@@ -225,6 +234,7 @@ export class MailService {
   }): Promise<void> {
     const quoteUrl = params.quoteUrl ?? this.frontendUrl('/quotes');
     const quoteCode = params.quoteId ? this.formatQuoteCode(params.quoteId) : 'Cotización';
+
     await this.sendMail({
       to: params.to,
       subject: `Respuesta disponible para tu cotización ${quoteCode}`,
@@ -238,7 +248,9 @@ export class MailService {
         params.deliveryTime ? `Tiempo de entrega: ${params.deliveryTime}` : '',
         params.notes ? `Notas: ${params.notes}` : '',
         `Ver cotización: ${quoteUrl}`,
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       html: this.renderTemplate({
         title: 'Ya tenemos una respuesta para tu cotización',
         preheader: `Respuesta disponible para ${quoteCode}.`,
@@ -298,15 +310,14 @@ export class MailService {
   }): Promise<void> {
     const orderCode = this.formatOrderLabel(params.orderNumber);
     const trackingUrl = params.trackingUrl ?? this.frontendUrl('/orders');
+
     const summary = [
       { label: 'Estado', value: params.statusLabel },
       { label: 'Pedido', value: orderCode },
       params.estimatedDeliveryDate
         ? { label: 'Entrega estimada', value: this.formatDate(params.estimatedDeliveryDate) }
         : null,
-      params.total !== undefined
-        ? { label: 'Total', value: this.formatMoney(params.total) }
-        : null,
+      params.total !== undefined ? { label: 'Total', value: this.formatMoney(params.total) } : null,
     ].filter((item): item is { label: string; value: string } => Boolean(item));
 
     await this.sendMail({
@@ -322,7 +333,9 @@ export class MailService {
         params.total !== undefined ? `Total: ${this.formatMoney(params.total)}` : '',
         this.formatItemsText(params.items ?? []),
         `Ver seguimiento: ${trackingUrl}`,
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       html: this.renderTemplate({
         title: params.title,
         preheader: `${params.statusLabel} - ${orderCode}`,
@@ -340,6 +353,7 @@ export class MailService {
 
   async sendWelcomeEmail(params: { to: string; customerName: string; role?: MailUserRole }): Promise<void> {
     const role = params.role ?? 'CLIENT';
+
     const roleMessage: Record<MailUserRole, string> = {
       CLIENT: 'Ya puedes explorar productos, agregar al carrito y hacer pedidos.',
       SELLER: 'Ya puedes ingresar a tu panel productor para gestionar productos y cotizaciones.',
@@ -350,12 +364,7 @@ export class MailService {
     await this.sendMail({
       to: params.to,
       subject: 'Bienvenido a Parque Industrial Conecta',
-      text: [
-        `Hola ${params.customerName},`,
-        '',
-        'Tu cuenta fue creada correctamente.',
-        roleMessage[role],
-      ].join('\n'),
+      text: [`Hola ${params.customerName},`, '', 'Tu cuenta fue creada correctamente.', roleMessage[role]].join('\n'),
       html: this.renderTemplate({
         title: `Bienvenido, ${params.customerName}`,
         preheader: 'Tu cuenta fue creada correctamente.',
@@ -383,6 +392,7 @@ export class MailService {
 
   private getTransporter(): Transporter | null {
     const provider = (this.config.get<string>('MAIL_PROVIDER') ?? 'log').toLowerCase();
+
     if (provider !== 'smtp') {
       this.logger.warn(`MAIL_PROVIDER="${provider}" no usa envio SMTP. Correo omitido.`);
       return null;
@@ -390,18 +400,33 @@ export class MailService {
 
     const user = this.config.get<string>('SMTP_USER')?.trim();
     const pass = this.config.get<string>('SMTP_PASS')?.trim();
+
     if (!user || !pass) {
       this.logger.warn('SMTP_USER o SMTP_PASS no configurado. Correo omitido.');
       return null;
     }
 
     if (!this.transporter) {
-      this.transporter = nodemailer.createTransport({
-        host: this.config.get<string>('SMTP_HOST') ?? 'smtp.gmail.com',
-        port: Number(this.config.get<string>('SMTP_PORT') ?? 587),
+      const host = this.config.get<string>('SMTP_HOST') ?? 'smtp.gmail.com';
+
+      const smtpOptions: SMTPTransport.Options & { family: 4 } = {
+        host,
+        port: Number(this.config.get<string>('SMTP_PORT') ?? 465),
         secure: this.parseBoolean(this.config.get<string>('SMTP_SECURE')),
-        auth: { user, pass },
-      });
+        auth: {
+          user,
+          pass,
+        },
+        family: 4,
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000,
+        tls: {
+          servername: host,
+        },
+      };
+
+      this.transporter = nodemailer.createTransport(smtpOptions);
     }
 
     return this.transporter;
@@ -409,45 +434,63 @@ export class MailService {
 
   private renderTemplate(options: TemplateOptions): string {
     const paragraphs = options.paragraphs ?? [];
-    const cta = options.ctaUrl && options.ctaLabel
-      ? `<a href="${this.escape(options.ctaUrl)}" style="display:inline-block;background:#0f2c59;color:#ffffff;text-decoration:none;padding:13px 20px;border-radius:12px;font-weight:800;">${this.escape(options.ctaLabel)}</a>`
-      : '';
+
+    const cta =
+      options.ctaUrl && options.ctaLabel
+        ? `<a href="${this.escape(options.ctaUrl)}" style="display:inline-block;background:#0f2c59;color:#ffffff;text-decoration:none;padding:13px 20px;border-radius:12px;font-weight:800;">${this.escape(options.ctaLabel)}</a>`
+        : '';
+
     const preheader = options.preheader
       ? `<div style="display:none;max-height:0;overflow:hidden;color:transparent;opacity:0;">${this.escape(options.preheader)}</div>`
       : '';
-    const codeBlock = options.codeLabel && options.codeValue
-      ? `<div style="margin:18px 0;padding:14px 16px;border-radius:14px;background:#f7faf8;border:1px solid #e0e9e4;">
+
+    const codeBlock =
+      options.codeLabel && options.codeValue
+        ? `<div style="margin:18px 0;padding:14px 16px;border-radius:14px;background:#f7faf8;border:1px solid #e0e9e4;">
           <div style="font-size:12px;color:#64746b;text-transform:uppercase;letter-spacing:.06em;font-weight:800;">${this.escape(options.codeLabel)}</div>
           <div style="font-size:21px;color:#0f2c59;font-weight:900;margin-top:4px;">${this.escape(options.codeValue)}</div>
         </div>`
-      : '';
+        : '';
+
     const badge = options.badge
       ? `<span style="display:inline-block;margin:0 0 14px;padding:7px 11px;border-radius:999px;background:#e8f5e9;color:#2e7d32;font-size:12px;font-weight:900;letter-spacing:.03em;text-transform:uppercase;">${this.escape(options.badge)}</span>`
       : '';
-    const sections = (options.sections ?? []).map((section) => {
-      const body = Array.isArray(section.body)
-        ? section.body.map((line) => `<p style="font-size:14px;line-height:1.55;margin:0 0 7px;color:#344054;">${this.escape(line)}</p>`).join('')
-        : `<p style="font-size:14px;line-height:1.55;margin:0;color:#344054;">${this.escape(section.body)}</p>`;
-      return `<div style="margin-top:18px;padding:16px;border-radius:14px;background:#fbfcfb;border:1px solid #e8eee9;">
+
+    const sections = (options.sections ?? [])
+      .map((section) => {
+        const body = Array.isArray(section.body)
+          ? section.body
+              .map((line) => `<p style="font-size:14px;line-height:1.55;margin:0 0 7px;color:#344054;">${this.escape(line)}</p>`)
+              .join('')
+          : `<p style="font-size:14px;line-height:1.55;margin:0;color:#344054;">${this.escape(section.body)}</p>`;
+
+        return `<div style="margin-top:18px;padding:16px;border-radius:14px;background:#fbfcfb;border:1px solid #e8eee9;">
         <h2 style="font-size:15px;margin:0 0 10px;color:#0f2c59;">${this.escape(section.title)}</h2>
         ${body}
       </div>`;
-    }).join('');
+      })
+      .join('');
+
     const summary = options.summary?.length
       ? `<div style="margin-top:20px;">
           <h2 style="font-size:16px;line-height:1.3;margin:0 0 10px;color:#0f2c59;">Resumen</h2>
           <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #e1e8e2;border-radius:14px;overflow:hidden;background:#fbfcfb;">
             <tbody>
-              ${options.summary.map((item) => `
+              ${options.summary
+                .map(
+                  (item) => `
                 <tr>
                   <td style="padding:13px 14px;border-bottom:1px solid #edf2ee;color:#64746b;font-size:13px;font-weight:800;width:42%;">${this.escape(item.label)}</td>
                   <td style="padding:13px 14px;border-bottom:1px solid #edf2ee;color:#0f2c59;font-size:14px;font-weight:900;text-align:right;">${this.escape(item.value)}</td>
                 </tr>
-              `).join('')}
+              `,
+                )
+                .join('')}
             </tbody>
           </table>
         </div>`
       : '';
+
     const itemsTable = options.items?.length ? this.renderItemsTable(options.items) : '';
 
     return `
@@ -460,7 +503,9 @@ export class MailService {
             <h1 style="font-size:27px;line-height:1.22;margin:0 0 14px;color:#0f2c59;">${this.escape(options.title)}</h1>
             <p style="font-size:16px;line-height:1.65;margin:0 0 16px;color:#344054;">${this.escape(options.intro)}</p>
             ${codeBlock}
-            ${paragraphs.map((paragraph) => `<p style="font-size:15px;line-height:1.58;margin:0 0 12px;color:#344054;">${this.escape(paragraph)}</p>`).join('')}
+            ${paragraphs
+              .map((paragraph) => `<p style="font-size:15px;line-height:1.58;margin:0 0 12px;color:#344054;">${this.escape(paragraph)}</p>`)
+              .join('')}
             ${summary}
             ${sections}
             ${itemsTable}
@@ -488,7 +533,9 @@ export class MailService {
             </tr>
           </thead>
           <tbody>
-            ${items.map((item) => `
+            ${items
+              .map(
+                (item) => `
               <tr>
                 <td style="padding:12px;border-top:1px solid #edf2ee;color:#344054;font-size:14px;">
                   <strong style="color:#0f2c59;">${this.escape(item.title)}</strong>
@@ -498,7 +545,9 @@ export class MailService {
                 <td align="right" style="padding:12px;border-top:1px solid #edf2ee;color:#344054;font-size:14px;">${item.unitPrice === undefined ? '-' : this.escape(this.formatMoney(item.unitPrice))}</td>
                 <td align="right" style="padding:12px;border-top:1px solid #edf2ee;color:#344054;font-size:14px;font-weight:800;">${item.totalPrice === undefined ? '-' : this.escape(this.formatMoney(item.totalPrice))}</td>
               </tr>
-            `).join('')}
+            `,
+              )
+              .join('')}
           </tbody>
         </table>
       </div>
@@ -507,6 +556,7 @@ export class MailService {
 
   private formatItemsText(items: MailProductItem[]): string {
     if (!items.length) return '';
+
     return [
       'Productos:',
       ...items.map((item) => {
@@ -524,13 +574,21 @@ export class MailService {
 
   private formatDate(value: string | Date | null | undefined): string {
     if (!value) return 'Por confirmar';
-    return new Date(value).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return new Date(value).toLocaleDateString('es-PE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
   }
 
   private formatMoney(value: number | string): string {
     const amount = Number(value);
     if (!Number.isFinite(amount)) return String(value);
-    return `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    return `S/ ${amount.toLocaleString('es-PE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
   }
 
   private formatOrderNumber(orderNumber: number | string): string {
