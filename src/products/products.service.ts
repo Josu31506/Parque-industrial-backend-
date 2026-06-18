@@ -22,11 +22,12 @@ export class ProductsService {
     this.timeStart('products-service-create');
     const producer = await this.ensureSellerCanUseProducer(dto.producerId, actor);
     this.validateAvailability(dto.availabilityType, dto.stock);
+    await this.validateCategoryId(dto.categoryId);
     const slug = await this.buildUniqueSlug(producer.businessName, dto.slug ?? dto.title);
 
     try {
       this.timeStart('prisma-product-create');
-      return await this.prisma.product.create({
+      const product = await this.prisma.product.create({
         data: {
           ...dto,
           producerId: producer.id,
@@ -36,6 +37,16 @@ export class ProductsService {
         },
         include: this.productInclude(),
       });
+      return product;
+    } catch (error) {
+      if (dto.model3dUrl) {
+        try {
+          await this.uploadsService.deleteFileByUrl(dto.model3dUrl);
+        } catch (delError) {
+          console.warn('No se pudo limpiar el modelo 3D subido tras fallo de creación', delError);
+        }
+      }
+      throw error;
     } finally {
       this.timeEnd('prisma-product-create');
       this.timeEnd('products-service-create');
@@ -127,10 +138,8 @@ export class ProductsService {
     });
     this.ensureActorCanManageProducer(product.producer, actor);
 
-    if (dto.model3dUrl !== undefined && dto.model3dUrl !== product.model3dUrl) {
-      if (product.model3dUrl) {
-        await this.uploadsService.deleteFileByUrl(product.model3dUrl);
-      }
+    if (dto.categoryId !== undefined && dto.categoryId !== product.categoryId) {
+      await this.validateCategoryId(dto.categoryId);
     }
 
     const nextProducerId = dto.producerId ?? product.producerId;
@@ -146,9 +155,11 @@ export class ProductsService {
       this.validateAvailability(dto.availabilityType, dto.stock ?? product.stock ?? undefined);
     }
 
+    const previousModel3dUrl = product.model3dUrl;
+
     try {
       this.timeStart('prisma-product-update');
-      return await this.prisma.product.update({
+      const updatedProduct = await this.prisma.product.update({
         where: { id },
         data: {
           ...dto,
@@ -159,6 +170,36 @@ export class ProductsService {
         },
         include: this.productInclude(),
       });
+
+      // Solo después de actualizar correctamente la BD:
+      if (
+        dto.model3dUrl !== undefined &&
+        dto.model3dUrl !== previousModel3dUrl &&
+        previousModel3dUrl
+      ) {
+        try {
+          await this.uploadsService.deleteFileByUrl(previousModel3dUrl);
+        } catch (error) {
+          console.warn('No se pudo eliminar el modelo 3D anterior de Storage', error);
+        }
+      }
+
+      return updatedProduct;
+    } catch (error) {
+      // Evitar archivos huérfanos si la actualización falla:
+      // Borrar el nuevo modelo recién subido si es distinto del anterior
+      if (
+        dto.model3dUrl !== undefined &&
+        dto.model3dUrl !== previousModel3dUrl &&
+        dto.model3dUrl
+      ) {
+        try {
+          await this.uploadsService.deleteFileByUrl(dto.model3dUrl);
+        } catch (delError) {
+          console.warn('No se pudo limpiar el modelo 3D nuevo subido tras fallo de actualización', delError);
+        }
+      }
+      throw error;
     } finally {
       this.timeEnd('prisma-product-update');
       this.timeEnd('products-service-update');
@@ -176,6 +217,18 @@ export class ProductsService {
       data: { isActive: false },
       include: this.productInclude(),
     });
+  }
+
+  private async validateCategoryId(categoryId: string) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        'La categoría seleccionada no existe o ya no está disponible. Actualiza la página y selecciona una categoría válida.',
+      );
+    }
   }
 
   private validateAvailability(availabilityType: AvailabilityType, stock?: number) {

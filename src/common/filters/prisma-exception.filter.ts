@@ -29,6 +29,11 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       case 'P2003':
         status = HttpStatus.BAD_REQUEST;
         message = 'Error de relación entre registros';
+        console.error('Prisma P2003', {
+          code: exception.code,
+          meta: exception.meta,
+          message: exception.message,
+        });
         break;
 
       case 'P2021':
