@@ -7,12 +7,16 @@ import { getPagination, paginatedResponse } from '../common/utils/pagination';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UploadsService } from '../uploads/uploads.service';
 
 @Injectable()
 export class ProductsService {
   private readonly devTimers = new Map<string, number[]>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploadsService: UploadsService,
+  ) {}
 
   async create(dto: CreateProductDto, actor: { sub: string; role: string }) {
     this.timeStart('products-service-create');
@@ -122,6 +126,12 @@ export class ProductsService {
       include: { producer: true },
     });
     this.ensureActorCanManageProducer(product.producer, actor);
+
+    if (dto.model3dUrl !== undefined && dto.model3dUrl !== product.model3dUrl) {
+      if (product.model3dUrl) {
+        await this.uploadsService.deleteFileByUrl(product.model3dUrl);
+      }
+    }
 
     const nextProducerId = dto.producerId ?? product.producerId;
     const producer = nextProducerId === product.producerId
@@ -233,6 +243,7 @@ export class ProductsService {
       price: true,
       numericPrice: true,
       imageUrl: true,
+      model3dUrl: true,
       badge: true,
       type: true,
       availabilityType: true,

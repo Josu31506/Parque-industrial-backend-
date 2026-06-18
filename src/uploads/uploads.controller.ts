@@ -52,6 +52,40 @@ export class UploadsController {
     return this.uploadsService.uploadProductImage(file, user.sub);
   }
 
+  @Post('product-model')
+  @Roles(Role.SELLER, Role.ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    fileFilter: (_request, file, callback) => {
+      const extension = file.originalname.toLowerCase().split('.').pop();
+      if (extension !== 'glb') {
+        callback(new BadRequestException('Solo se permiten archivos con extensión .glb'), false);
+        return;
+      }
+      callback(null, true);
+    },
+  }))
+  uploadProductModel(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: { sub: string },
+  ) {
+    return this.uploadsService.uploadProductModel(file, user.sub);
+  }
+
   @Post('claim-image')
   @Roles(Role.CLIENT, Role.ADMIN, Role.ADVISOR)
   @ApiConsumes('multipart/form-data')

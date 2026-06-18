@@ -60,6 +60,52 @@ export class UploadsService {
     return { url: data.publicUrl };
   }
 
+  async uploadProductModel(file: Express.Multer.File | undefined, userId: string) {
+    this.validateProductModel(file);
+    const supabase = this.getSupabaseClient();
+
+    const path = this.buildProductModelPath(file as Express.Multer.File, userId);
+    const { error } = await supabase.storage
+      .from(this.bucket)
+      .upload(path, (file as Express.Multer.File).buffer, {
+        contentType: 'model/gltf-binary',
+        upsert: false,
+      });
+
+    if (error) {
+      throw new BadRequestException(error.message || 'No se pudo subir el modelo 3D.');
+    }
+
+    const { data } = supabase.storage.from(this.bucket).getPublicUrl(path);
+    return { url: data.publicUrl };
+  }
+
+  async deleteFileByUrl(url: string | null | undefined): Promise<void> {
+    if (!url) return;
+
+    const supabaseUrl = this.config.get<string>('SUPABASE_URL');
+    if (!supabaseUrl) return;
+
+    if (!url.startsWith(supabaseUrl)) return;
+
+    const prefix = `/storage/v1/object/public/${this.bucket}/`;
+    const urlPath = new URL(url).pathname;
+
+    if (!urlPath.startsWith(prefix)) return;
+
+    const relativePath = decodeURIComponent(urlPath.substring(prefix.length));
+
+    if (!relativePath.startsWith('models/')) return;
+
+    const supabase = this.getSupabaseClient();
+    const { error } = await supabase.storage.from(this.bucket).remove([relativePath]);
+    if (error) {
+      console.error(`Error deleting file from Supabase storage: ${error.message}`);
+    } else {
+      console.log(`Successfully deleted file from Supabase storage: ${relativePath}`);
+    }
+  }
+
   private getSupabaseClient() {
     if (this.supabase) return this.supabase;
 
@@ -95,6 +141,29 @@ export class UploadsService {
     }
   }
 
+  private validateProductModel(file: Express.Multer.File | undefined) {
+    if (!file) {
+      throw new BadRequestException('El archivo del modelo 3D es obligatorio.');
+    }
+
+    const extension = file.originalname.toLowerCase().split('.').pop();
+    if (extension !== 'glb') {
+      throw new BadRequestException('Solo se permiten archivos con extensión .glb');
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      throw new BadRequestException('El archivo no debe superar los 10 MB.');
+    }
+
+    if (!this.hasValidGlbSignature(file)) {
+      throw new BadRequestException('El archivo no tiene una firma binaria de GLB válida.');
+    }
+
+    if (!this.hasValidGlbScene(file.buffer)) {
+      throw new BadRequestException('El archivo GLB no contiene una escena 3D válida. Exporta nuevamente el modelo como GLB para web.');
+    }
+  }
+
   private buildProductImagePath(file: Express.Multer.File, userId: string) {
     const normalizedName = this.normalizeFileName(file.originalname);
     const extension = PRODUCT_IMAGE_EXTENSIONS[file.mimetype] ?? 'jpg';
@@ -105,6 +174,11 @@ export class UploadsService {
     const normalizedName = this.normalizeFileName(file.originalname);
     const extension = PRODUCT_IMAGE_EXTENSIONS[file.mimetype] ?? 'jpg';
     return `claims/${userId}/${randomUUID()}-${normalizedName}.${extension}`;
+  }
+
+  private buildProductModelPath(file: Express.Multer.File, userId: string) {
+    const normalizedName = this.normalizeFileName(file.originalname);
+    return `models/${userId}/${randomUUID()}-${normalizedName}.glb`;
   }
 
   private normalizeFileName(fileName: string) {
@@ -149,5 +223,43 @@ export class UploadsService {
     }
 
     return false;
+  }
+
+  private hasValidGlbSignature(file: Express.Multer.File) {
+    const buffer = file.buffer;
+    return buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'glTF';
+  }
+
+  private hasValidGlbScene(buffer: Buffer): boolean {
+    try {
+      if (buffer.length < 20) return false;
+
+      const magic = buffer.subarray(0, 4).toString('ascii');
+      if (magic !== 'glTF') return false;
+
+      const version = buffer.readUInt32LE(4);
+      if (version !== 2) return false;
+
+      const chunkLength = buffer.readUInt32LE(12);
+      const chunkType = buffer.subarray(16, 20).toString('ascii');
+
+      if (chunkType !== 'JSON') return false;
+      if (buffer.length < 20 + chunkLength) return false;
+
+      const jsonStr = buffer.subarray(20, 20 + chunkLength).toString('utf-8');
+      const gltf = JSON.parse(jsonStr);
+
+      if (!gltf.scenes || !Array.isArray(gltf.scenes) || gltf.scenes.length === 0) {
+        return false;
+      }
+
+      if (!gltf.nodes || !Array.isArray(gltf.nodes) || gltf.nodes.length === 0) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 }

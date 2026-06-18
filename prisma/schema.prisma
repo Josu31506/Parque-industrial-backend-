@@ -218,6 +218,7 @@ model Product {
   price                 Decimal          @db.Decimal(12, 2)
   numericPrice          Float
   imageUrl              String
+  model3dUrl            String?
   badge                 String?
   type                  ProductType
   availabilityType      AvailabilityType

@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AvailabilityType, ProductType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
 
 export class CreateProductDto {
   @ApiPropertyOptional()
@@ -35,6 +35,16 @@ export class CreateProductDto {
   @ApiProperty()
   @IsString()
   imageUrl: string;
+
+  @ApiPropertyOptional({ description: 'URL del modelo 3D (.glb). Acepta HTTPS, ruta interna /models/ o null para quitar' })
+  @IsOptional()
+  @ValidateIf((dto: any) => dto.model3dUrl !== null)
+  @IsString()
+  @Matches(
+    /^(https:\/\/.+\.glb(\?.*)?|\/models\/.+\.glb)$/i,
+    { message: 'model3dUrl debe ser una URL HTTPS o ruta /models/ con extensión .glb' },
+  )
+  model3dUrl?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
