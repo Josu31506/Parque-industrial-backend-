@@ -42,7 +42,7 @@ export class QuotesService {
     const where: Prisma.QuoteRequestWhereInput = { customerId };
 
     try {
-      const [items, total] = await this.prisma.$transaction([
+      const [items, total] = await Promise.all([
         this.prisma.quoteRequest.findMany({
           where,
           include: { resolutions: true },
@@ -61,7 +61,7 @@ export class QuotesService {
 
   async findAll(query: SmallPaginationQueryDto) {
     const { page, limit, skip } = getPagination(query.page, query.limit);
-    const [items, total] = await this.prisma.$transaction([
+    const [items, total] = await Promise.all([
       this.prisma.quoteRequest.findMany({
         include: { customer: { select: this.safeCustomerSelect() }, resolutions: true },
         skip,
@@ -77,7 +77,7 @@ export class QuotesService {
   async findImageQuotes(query: SmallPaginationQueryDto) {
     const { page, limit, skip } = getPagination(query.page, query.limit);
     const where: Prisma.QuoteRequestWhereInput = { type: 'REFERENCE_IMAGE' };
-    const [items, total] = await this.prisma.$transaction([
+    const [items, total] = await Promise.all([
       this.prisma.quoteRequest.findMany({
         where,
         include: { customer: { select: this.safeCustomerSelect() }, resolutions: true },
@@ -107,7 +107,7 @@ export class QuotesService {
         ],
       };
 
-      const [items, total] = await this.prisma.$transaction([
+      const [items, total] = await Promise.all([
         this.prisma.quoteRequest.findMany({
           where,
           select: {

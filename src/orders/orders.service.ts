@@ -26,10 +26,9 @@ export class OrdersService {
     const where: Prisma.OrderWhereInput = { customerId: userId };
 
     try {
-      const [items, total] = await this.prisma.$transaction([
+      const [items, total] = await Promise.all([
         this.prisma.order.findMany({
           where,
-          include: this.orderInclude(),
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },

@@ -17,7 +17,7 @@ export class SalesService {
   async findMySales(userId: string, role: string, query: SmallPaginationQueryDto) {
     const { page, limit, skip } = getPagination(query.page, query.limit);
     if (role === Role.ADMIN) {
-      const [items, total] = await this.prisma.$transaction([
+      const [items, total] = await Promise.all([
         this.prisma.sale.findMany({
           include: this.saleListInclude(),
           skip,
@@ -31,7 +31,7 @@ export class SalesService {
 
     const producer = await this.prisma.producer.findUniqueOrThrow({ where: { userId } });
     const where: Prisma.SaleWhereInput = { producerId: producer.id };
-    const [items, total] = await this.prisma.$transaction([
+    const [items, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         include: this.saleListInclude(),
@@ -75,7 +75,7 @@ export class SalesService {
       createdAt: { gte: monthStart, lt: monthEnd },
     };
 
-    const [items, total, monthlySales] = await this.prisma.$transaction([
+    const [items, total, monthlySales] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         select: this.earningsSaleSelect(),

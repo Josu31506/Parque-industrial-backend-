@@ -69,7 +69,7 @@ export class PurchaseRequestsService {
     const { page, limit, skip } = getPagination(query.page, query.limit);
     const where: Prisma.PurchaseRequestWhereInput = { customerId };
 
-    const [items, total] = await this.prisma.$transaction([
+    const [items, total] = await Promise.all([
       this.prisma.purchaseRequest.findMany({
         where,
         include: { items: { include: { product: true, producer: true } }, groups: { include: { producer: true } } },
@@ -91,7 +91,7 @@ export class PurchaseRequestsService {
     const { page, limit, skip } = getPagination(query.page, query.limit);
     const where: Prisma.PurchaseRequestGroupWhereInput = { producerId: producer.id };
 
-    const [groups, total] = await this.prisma.$transaction([
+    const [groups, total] = await Promise.all([
       this.prisma.purchaseRequestGroup.findMany({
         where,
         include: {

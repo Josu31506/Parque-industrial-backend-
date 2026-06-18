@@ -242,6 +242,9 @@ model Product {
   saleItems             SaleItem[]
   quoteRequests         QuoteRequest[]
   reviews               Review[]
+
+  @@index([producerId])
+  @@index([categoryId])
 }
 
 model CartItem {
@@ -280,6 +283,8 @@ model PurchaseRequest {
   items    PurchaseRequestItem[]
   groups   PurchaseRequestGroup[]
   order    Order?
+
+  @@index([customerId])
 }
 
 model PurchaseRequestItem {
@@ -294,6 +299,10 @@ model PurchaseRequestItem {
   purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id])
   product         Product         @relation(fields: [productId], references: [id])
   producer        Producer        @relation(fields: [producerId], references: [id])
+
+  @@index([purchaseRequestId])
+  @@index([productId])
+  @@index([producerId])
 }
 
 model PurchaseRequestGroup {
@@ -310,6 +319,8 @@ model PurchaseRequestGroup {
   producer        Producer        @relation(fields: [producerId], references: [id])
 
   @@unique([purchaseRequestId, producerId])
+  @@index([purchaseRequestId])
+  @@index([producerId])
 }
 
 model Order {
@@ -341,6 +352,8 @@ model Order {
   sales           Sale[]
   claims          Claim[]
   reviews         Review[]
+
+  @@index([customerId])
 }
 
 model OrderItem {
@@ -359,6 +372,11 @@ model OrderItem {
   product  Product?  @relation(fields: [productId], references: [id])
   quote    QuoteRequest? @relation(fields: [quoteId], references: [id])
   producer Producer @relation(fields: [producerId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([quoteId])
+  @@index([producerId])
 }
 
 model Sale {
@@ -380,6 +398,9 @@ model Sale {
   order    Order      @relation(fields: [orderId], references: [id])
   producer Producer   @relation(fields: [producerId], references: [id])
   items    SaleItem[]
+
+  @@index([orderId])
+  @@index([producerId])
 }
 
 model SaleItem {
@@ -396,6 +417,10 @@ model SaleItem {
   sale    Sale    @relation(fields: [saleId], references: [id])
   product Product? @relation(fields: [productId], references: [id])
   quote   QuoteRequest? @relation(fields: [quoteId], references: [id])
+
+  @@index([saleId])
+  @@index([productId])
+  @@index([quoteId])
 }
 
 model Claim {
@@ -412,6 +437,9 @@ model Claim {
 
   order    Order @relation(fields: [orderId], references: [id])
   customer User  @relation(fields: [customerId], references: [id])
+
+  @@index([orderId])
+  @@index([customerId])
 }
 
 model Notification {
@@ -426,6 +454,8 @@ model Notification {
   createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 model QuoteRequest {
@@ -459,6 +489,10 @@ model QuoteRequest {
   cartItems   CartItem[]
   orderItems  OrderItem[]
   saleItems   SaleItem[]
+
+  @@index([customerId])
+  @@index([productId])
+  @@index([producerId])
 }
 
 model QuoteResolution {
@@ -475,6 +509,9 @@ model QuoteResolution {
 
   quoteRequest QuoteRequest @relation(fields: [quoteRequestId], references: [id])
   producer     Producer     @relation(fields: [producerId], references: [id])
+
+  @@index([quoteRequestId])
+  @@index([producerId])
 }
 
 model CommissionConfig {
@@ -503,6 +540,8 @@ model Invitation {
 
   @@index([email])
   @@index([status])
+  @@index([invitedById])
+  @@index([producerId])
 }
 
 model Review {
